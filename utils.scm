@@ -5,6 +5,22 @@
 	)
 )
 
-(define (make-card val suit) (cons val suit))
-(define (value? a) (car a))
-(define (suit? a) (cdr a))
+
+(define (make-card suit rank) (cons suit rank))
+(define (get-suit a) (car a))
+(define (get-value a) (cdr a))
+
+
+(define values (append (iota 10 1) '(J Q K A)))
+
+(define (make-stack)
+	(define (pile suit) (map (lambda (x) (make-card suit x)) values))
+	(define (append-piles)
+		(define (append-pile lst suits)
+			(if (null? suits)
+				lst
+				(append lst (pile (car suits)) (append-pile lst (cdr suits)))
+		))
+		(append-pile '() '(♠ ♣ ♥ ♦))
+	)
+)
