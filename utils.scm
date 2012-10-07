@@ -8,7 +8,12 @@
 
 (define (get-suit a) (car a))
 (define (get-value a) (cdr a))
-
+(define (any-cards? rank lst)
+	(cond ((null? lst) #f) 
+		((eq? rank (car (get-suit lst))) #t)
+		(else (any-cards? rank (cdr lst)))
+	)
+)
 
 (define values (append (iota 10 2) '(J Q K A)))
 
