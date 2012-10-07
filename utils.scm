@@ -1,19 +1,19 @@
 (define (who-starts?) 
-	(if (zero? ((lambda (num) (random num)) 2)
+	(if (zero? ((lambda (num) (random-integer num)) 2)
 		) 'computer 
 		' player
 	)
 )
 
 
-(define (make-card suit rank) (cons suit rank))
 (define (get-suit a) (car a))
 (define (get-value a) (cdr a))
 
 
-(define values (append (iota 10 1) '(J Q K A)))
+(define values (append (iota 10 2) '(J Q K A)))
 
 (define (make-stack)
+	(define (make-card suit rank) (cons suit rank))
 	(define (pile suit) (map (lambda (x) (make-card suit x)) values))
 	(define (append-piles)
 		(define (append-pile lst suits)
@@ -23,4 +23,5 @@
 		))
 		(append-pile '() '(♠ ♣ ♥ ♦))
 	)
+	(shuffle make-stack)
 )
