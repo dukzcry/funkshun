@@ -36,3 +36,7 @@
 		(set! deck (cdr deck))
 		top)
 ))
+
+(define (add-card pile) (
+	append pile `(,(pop))
+))
