@@ -14,6 +14,17 @@
 		(else (any-cards-of? rank (cdr lst)))
 	)
 )
+(define (send rank pile) (
+	filter (lambda (x) (eq? rank (get-rank x))) pile
+))
+; (recv (pop) deck) or (recv books pile)
+(define (recv books pile) (append pile books))
+(define (draw pile)
+	(define (sort-filter p less) (sort (filter (lambda (x) (p (get-rank x))) pile) less))
+	(append (sort-filter number? (lambda (x y) (< (get-rank x) (get-rank y))))
+		(sort-filter symbol? (lambda (x y) (string<? (symbol->string (get-rank x)) 
+			(symbol->string (get-rank y))))))
+)
 
 (define ranks (append (iota 9 2) '(J Q K A)))
 (define (make-deck)
@@ -27,16 +38,17 @@
 		))
 		(append-pile '() '(♠ ♣ ♥ ♦))
 	)
-	(shuffle append-piles)
+	(define (shuffle lst) (
+		map cdr
+		(sort (map (lambda (x) (cons (random-real 1.0) x)) lst)
+			(lambda (x y) (< (car x) (car y)))
+	)))
+	(shuffle (append-piles))
 )
 (define (pop) (
 	if (null? deck)
 		'()
 	(let ((top (car deck)))
 		(set! deck (cdr deck))
-		top)
-))
-
-(define (add-card pile) (
-	append pile `(,(pop))
-))
+		`(,top)
+)))
