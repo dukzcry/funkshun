@@ -67,3 +67,4 @@
                                 (append s (pop))
         )))
         (init-pile 1 computer user)
+)
