@@ -29,7 +29,7 @@
 	(display `("your pile is:"
 		,(append (sort-filter number? (lambda (x y) (< (get-rank x) (get-rank y))))
 		(sort-filter symbol? (lambda (x y) (string<? (symbol->string (get-rank x)) 
-			(symbol->string (get-rank y))))))
+			(symbol->string (get-rank y)))))) (newline)
 )))
 (define (book-ready? rank pile) (
 	if (eq? (fold-left (
