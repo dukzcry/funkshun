@@ -1,9 +1,15 @@
 (define (who-starts?) 
 	(if (zero? ((lambda (num) (random-integer num)) 2)
 		) 'computer 
-		' player
+		'player
 	)
 )
+(define (print-winner computer-score user-score) (
+	display `(,(cond ((> computer-score user-score) 'computer) 
+		((< computer-score user-score) 'player)
+		;(eq? computer-score user-score 'both)
+		"won"))
+))
 
 
 (define (get-rank a) (car a))
