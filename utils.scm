@@ -5,11 +5,11 @@
 	)
 )
 (define (print-winner computer-score user-score) (
-	display `(,(cond ((> computer-score user-score) 'computer) 
-		((< computer-score user-score) 'player)
-		;(eq? computer-score user-score 'both)
+	lambda args (display `(,(cond ((apply > args) 'computer) 
+		((apply < args) 'player)
+		;(apply = args) 'both)
 		"won"))
-))
+)))
 
 
 (define (get-rank a) (car a))
