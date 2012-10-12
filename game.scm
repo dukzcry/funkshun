@@ -12,7 +12,7 @@
 		(set! user-pile (cdr piles))
 		(draw user-pile)
 		(let ((who (who-starts?)))
-			(display `(,who "starts first"))
+			(display `(,who "starts first")) (newline)
 		)
 	)
 (game))
