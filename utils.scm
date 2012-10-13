@@ -4,12 +4,12 @@
 		'player
 	)
 )
-(define (print-winner computer-score user-score) (
+(define print-winner (
 	lambda curry (display `(,(cond ((apply > curry) 'computer) 
 		((apply < curry) 'player)
 		;(apply = curry) 'both)
-		"won"))
-)))
+		) "won")) (newline)
+))
 
 
 (define (get-rank a) (car a))
