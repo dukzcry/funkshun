@@ -5,9 +5,9 @@
 	)
 )
 (define (print-winner computer-score user-score) (
-	lambda args (display `(,(cond ((apply > args) 'computer) 
-		((apply < args) 'player)
-		;(apply = args) 'both)
+	lambda curry (display `(,(cond ((apply > curry) 'computer) 
+		((apply < curry) 'player)
+		;(apply = curry) 'both)
 		"won"))
 )))
 
@@ -67,12 +67,12 @@
 
 ; (recv (pop) pile) or (recv cards pile)
 (define (recv lst pile) (append pile lst))
-(define (init-piles computer user computer-func user-func)
+(define (init-piles computer-func user-func)
 	(define (init-pile n f s)
 		(if (> n 7)
 			(cons f s)
 			(init-pile (+ n 1) (append f (computer-func))
 				(append s (user-func))
 	)))
-	(init-pile 1 computer user)
+	(init-pile 1 '() '())
 )
