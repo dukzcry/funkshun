@@ -7,7 +7,7 @@
 	(define user-pile '())
 	(define computer-score '())
 	(define user-score '())
-	(let ((piles (init-piles computer-pile user-pile pop pop)))
+	(let ((piles (init-piles pop pop)))
 		(set! computer-pile (car piles))
 		(set! user-pile (cdr piles))
 	)
