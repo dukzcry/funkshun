@@ -5,10 +5,10 @@
 	)
 )
 (define print-winner (
-	lambda curry (display `(,(cond ((apply > curry) 'computer) 
+	lambda curry (ndisplay (cond ((apply > curry) 'computer) 
 		((apply < curry) 'player)
 		;(apply = curry) 'both)
-		) "won")) (newline)
+		) "won")
 ))
 
 
@@ -26,11 +26,11 @@
 ))
 (define (draw pile)
 	(define (sort-filter p less) (sort (filter (lambda (x) (p (get-rank x))) pile) less))
-	(display `("your pile is:"
-		,(append (sort-filter number? (lambda (x y) (< (get-rank x) (get-rank y))))
+	(ndisplay "your pile is:"
+		(append (sort-filter number? (lambda (x y) (< (get-rank x) (get-rank y))))
 		(sort-filter symbol? (lambda (x y) (string<? (symbol->string (get-rank x)) 
-			(symbol->string (get-rank y)))))) (newline)
-)))
+			(symbol->string (get-rank y))))))
+))
 (define (book-ready? rank pile) (
 	if (eq? (fold-left (
 		; non associative
@@ -71,8 +71,8 @@
 	(define (init-pile n f s)
 		(if (> n 7)
 			(cons f s)
-			(init-pile (+ n 1) (append f (computer-func))
-				(append s (user-func))
+			(init-pile (+ n 1) (computer-func f)
+				(user-func s)
 	)))
 	(init-pile 1 '() '())
 )
