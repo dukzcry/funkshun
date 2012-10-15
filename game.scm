@@ -3,8 +3,6 @@
 
 (define (game)
 	(set-deck!)
-	(define computer-pile '())
-	(define user-pile '())
 	(define computer-score 0)
 	(define user-score 0)
 	(let ((piles (init-piles (lambda (x) (append x (pop))) (lambda (x) (append x (pop)))

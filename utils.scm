@@ -21,9 +21,11 @@
 		(else (any-cards-of? rank (cdr pile)))
 	)
 )
-(define (send rank pile) (
-	filter (lambda (x) (eq? rank (get-rank x))) pile
-))
+(define (send rank pile)
+	(define rule `(eq? ',rank (get-rank x)))
+	(define (filter-pile func) (eval `(filter (lambda (x) (,@func)) ',pile)))
+	(cons (filter-pile rule) (filter-pile `(not ,rule)))
+)
 (define (draw pile)
 	(define (sort-filter p less) (sort (filter (lambda (x) (p (get-rank x))) pile) less))
 	(ndisplay "your pile is:"
@@ -71,8 +73,7 @@
 	(define (init-pile n f s)
 		(if (> n 7)
 			(cons f s)
-			(init-pile (+ n 1) (computer-func f)
-				(user-func s)
-	)))
+			(init-pile (+ n 1) (computer-func f) (user-func s))
+	))
 	(init-pile 1 '() '())
 )
