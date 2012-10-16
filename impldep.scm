@@ -1,4 +1,4 @@
-; tested with CHICKEN Version 4.7.0.6
+; tested with CHICKEN Version 4.8.0
 
 ;(use srfi-1) ; filter, iota
 (use srfi-27) ; random-real
