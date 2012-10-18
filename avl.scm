@@ -16,15 +16,15 @@
   (l-depth avl-l-depth) (r-depth avl-r-depth)
 )
 (define with-avl-tree (
-	lambda curry
-	(let ((obj (car curry)))
-		`((lambda (root less? equ?) ,@(cdr curry)) ,(avl-root obj) ,(avl-less obj) ,(avl-equ obj))
+	lambda pack
+	(let ((obj (car pack)))
+		`((lambda (root less? equ?) ,@(cdr pack)) ,(avl-root obj) ,(avl-less obj) ,(avl-equ obj))
 	)
 ))
 (define with-avl-node (
-	lambda curry
-	(let ((obj (car curry)))
-		`((lambda (key value l-child r-child l-depth r-depth) ,@(cdr curry)) ,(avl-key obj) 
+	lambda pack
+	(let ((obj (car pack)))
+		`((lambda (key value l-child r-child l-depth r-depth) ,@(cdr pack)) ,(avl-key obj) 
 			,(avl-value obj) ,(avl-l-child obj) ,(avl-r-child obj) ,(avl-l-depth obj) ,(avl-r-depth obj))
 	)
 ))
@@ -35,3 +35,13 @@
  with-avl-tree tree
   (avl-root! root (avl-tree-insert-node root key value less?))
 ))
+(define (avl-tree-insert-node node ckey cvalue less?)
+ (if (not (avl-node? node))
+  (make-avl-node ckey cvalue '() '() 0 0)
+   (let ((args (list node ckey cvalue less?)))
+        (with-avl-node node
+                       (if (less? ckey key)
+                           (apply avl-subtree-insert-node
+                                  insert-left l-child l-depth args)
+                           (apply avl-subtree-insert-node
+                                  insert-right r-child r-depth args))))))

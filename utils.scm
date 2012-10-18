@@ -5,9 +5,9 @@
 	)
 )
 (define print-winner (
-	lambda curry (ndisplay (cond ((apply > curry) 'computer) 
-		((apply < curry) 'player)
-		;(apply = curry) 'both)
+	lambda pack (ndisplay (cond ((apply > pack) 'computer) 
+		((apply < pack) 'player)
+		;(apply = pack) 'both)
 		) "won")
 ))
 

@@ -5,5 +5,5 @@
 
 (define fold-left fold)
 (define ndisplay (
-	lambda curry (display curry) (newline)
+	lambda pack (display pack) (newline)
 ))
