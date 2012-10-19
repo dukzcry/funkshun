@@ -1,11 +1,11 @@
-; implementation-independent AVL trees
-; mostly copy-paste from http://swizard.info/articles/functional-data-structures.html#link12
+; implementation-independent AVL tree
+; copy-paste from http://swizard.info/articles/functional-data-structures.html#link12
 
 ; srfi instead of non-standard (define-record)
 (use srfi-9) ; record types
 
 (define-record-type avl-tree (make-avl-tree root less? equ?) avl-tree?
-  (root avl-root avl-root!)
+  (root avl-root)
   (less? avl-less)
   (equ? avl-equ)
 )
@@ -15,6 +15,7 @@
   (l-child avl-l-child) (r-child avl-r-child)
   (l-depth avl-l-depth) (r-depth avl-r-depth)
 )
+; wrap body into lambda, feeding args with help of accessors
 (define with-avl-tree (
 	lambda pack
 	(let ((obj (car pack)))
@@ -31,17 +32,61 @@
 
 (define (make-empty-avl-tree less? equ?)
   (make-avl-tree '() less? equ?))
-(define (avl-tree-insert tree key value) (
- with-avl-tree tree
-  (avl-root! root (avl-tree-insert-node root key value less?))
-))
+(define (make-left node child depth)
+  (with-avl-node node
+                 (make-avl-node key value child r-child depth r-depth)))
+(define (make-right node child depth)
+  (with-avl-node node
+                 (make-avl-node key value l-child child l-depth depth)))
+(define (calc-depth node)
+  (with-avl-node node (+ (max l-depth r-depth) 1)))
+(define (avl-subtree-insert-node make-proc child depth node args)
+  (let ((new-child (apply avl-tree-insert-node child args)))
+    (with-avl-node new-child
+                   (make-proc node new-child (calc-depth new-child)))))
+
+(define rotate-right-set (list make-right
+                               avl-l-child
+                               make-left
+                               avl-r-child
+                               avl-r-depth))
+(define rotate-left-set  (list make-left
+                               avl-r-child
+                               make-right
+                               avl-l-child
+                               avl-l-depth))
+(define (avl-tree-rotate node make-a get-child-a make-b get-child-b get-depth-b)
+  (let* ((child-a (get-child-a node))
+         (child-b (get-child-b child-a))
+         (depth-b (get-depth-b child-a)))
+  		; new-child = foredad -> child ~ dad dir
+  		; new tree = dad -> new-child, modify dad depth
+    (let ((new-node (make-b node child-b depth-b)))
+      (make-a child-a new-node (calc-depth new-node)))))
+(define (avl-tree-check-rotate node)
+  (with-avl-node node
+                 (cond ((and (> l-depth r-depth)
+                             (> (- l-depth r-depth) 1))
+                        (apply avl-tree-rotate node rotate-right-set))
+                       ((and (> r-depth l-depth)
+                             (> (- r-depth l-depth) 1))
+                        (apply avl-tree-rotate node rotate-left-set))
+                       (else node))))
+
 (define (avl-tree-insert-node node ckey cvalue less?)
  (if (not (avl-node? node))
   (make-avl-node ckey cvalue '() '() 0 0)
-   (let ((args (list node ckey cvalue less?)))
+  	(avl-tree-check-rotate
+   	(let ((args (list node ckey cvalue less?)))
         (with-avl-node node
                        (if (less? ckey key)
                            (apply avl-subtree-insert-node
-                                  insert-left l-child l-depth args)
+                                  make-left l-child l-depth args)
                            (apply avl-subtree-insert-node
-                                  insert-right r-child r-depth args))))))
+                                  make-right r-child r-depth args)))))))
+(define (avl-tree-insert tree key value)
+  (with-avl-tree tree
+                 (make-avl-tree
+                  (avl-tree-insert-node root key value less?)
+                  less?
+                  equ?)))
