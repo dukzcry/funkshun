@@ -16,34 +16,26 @@
   (l-depth avl-l-depth) (r-depth avl-r-depth)
 )
 (define (with-avl-tree tree func) (
-		(eval `(let ([root (avl-root tree)]
-								[less? (avl-less tree)]
-								[equ? (avl-equ tree)])
-			(lambda () ,func)))
+	func (avl-root tree) (avl-less tree) (avl-equ tree)
 ))
 (define (with-avl-node node func) (
-	(eval `(let ([key (avl-key node)]
-														[value (avl-value node)]
-														[l-child (avl-l-child node)] [r-child (avl-r-child node)]
-														[l-depth (avl-l-child node)] [r-depth (avl-r-child node)])
-		(lambda () ,func)))
+	func (avl-key node) (avl-value node) (avl-l-child node) (avl-r-child node) (avl-l-depth node) (avl-r-depth node)
 ))
 
 (define (make-empty-avl-tree less? equ?)
   (make-avl-tree '() less? equ?))
 (define (:make-left node child depth)
 	(with-avl-node node
-                 `(make-avl-node key value ,child r-child ,depth r-depth)))
+                 (lambda (k v lc rc ld rd) (make-avl-node k v child rc depth rd))))
 (define (:make-right node child depth)
   (with-avl-node node
-                 `(make-avl-node key value l-child ,child l-depth ,depth)))
+                 (lambda (k v lc rc ld rd) (make-avl-node k v lc child ld depth))))
 (define (calc-depth node)
-  (with-avl-node node '(+ (max l-depth r-depth) 1)))
-(define (:avl-subtree-insert-node make-proc child node args)
+  (with-avl-node node (lambda (k v lc rc ld rd) (+ (max ld rd) 1))))
+(define (:avl-subtree-insert-node make-proc child node . args)
   (let ((new-child (apply :avl-tree-insert-node child args)))
     ; add new child, compose subtree
-    (with-avl-node new-child
-                   `(make-proc ,node ,new-child ,(calc-depth new-child)))))
+    (make-proc node new-child (calc-depth new-child))))
 
 (define :rotate-right-set (list :make-right
                                avl-l-child
@@ -65,13 +57,13 @@
       (make-a child-a new-node (calc-depth new-node)))))
 (define (avl-tree-check-rotate node)
   (with-avl-node node
-                 `(cond ((and (> l-depth r-depth)
-                             (> (- l-depth r-depth) 1))
-                        (apply :avl-tree-rotate ,node :rotate-right-set))
-                       ((and (> r-depth l-depth)
-                             (> (- r-depth l-depth) 1))
-                        (apply :avl-tree-rotate ,node :rotate-left-set))
-                       (else ,node))))
+                 (lambda (k v lc rc ld rd) (cond ((and (> ld rd)
+                             (> (- ld rd) 1))
+                        (apply :avl-tree-rotate node :rotate-right-set))
+                       ((and (> rd ld)
+                             (> (- rd ld) 1))
+                        (apply :avl-tree-rotate node :rotate-left-set))
+                       (else node)))))
 
 (define (:avl-tree-insert-node node ckey cvalue less?)
  (if (not (avl-node? node))
@@ -79,14 +71,14 @@
   	(avl-tree-check-rotate
    	(let ((args (list node ckey cvalue less?)))
         (with-avl-node node
-                       `(if (less? ,ckey key)
+                       (lambda (k v lc rc ld rd) (if (less? ckey k)
                            (apply :avl-subtree-insert-node
-                                  :make-left l-child ,args)
+                                  :make-left lc args)
                            (apply :avl-subtree-insert-node
-                                  :make-right r-child ,args)))))))
+                                  :make-right rc args))))))))
 (define (avl-tree-insert tree key value)
   (with-avl-tree tree
-                 `(make-avl-tree
-                  (:avl-tree-insert-node root ,key ,value less?)
-                  less?
-                  equ?)))
+                 (lambda (r l e) (make-avl-tree
+                  (:avl-tree-insert-node r key value l)
+                  l
+                  e))))
