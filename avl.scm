@@ -1,5 +1,5 @@
-; implementation-independent AVL tree
-; copy-paste from http://swizard.info/articles/functional-data-structures.html#link12
+; functional realization of AVL trees for >= R5RS implementations 
+; mostly copy-paste from http://swizard.info/articles/functional-data-structures.html#link12
 
 ; srfi instead of non-standard (define-record)
 (use srfi-9) ; record types
@@ -26,14 +26,20 @@
 
 (define (make-empty-avl-tree less? equ?)
  (make-avl-tree '() less? equ?))
+
+
 (define (:make-left node child depth)
  (with-avl-node node
                  (lambda (k v lc rc ld rd) (make-avl-node k v child rc depth rd))))
 (define (:make-right node child depth)
   (with-avl-node node
                  (lambda (k v lc rc ld rd) (make-avl-node k v lc child ld depth))))
+
+
 (define (calc-depth node)
   (with-avl-node node (lambda (k v lc rc ld rd) (+ (max ld rd) 1))))
+
+
 (define (:avl-subtree-insert-node make-proc child node . args)
   (let ((new-child (apply :avl-tree-insert-node child args)))
     ; add new child, compose subtree
@@ -57,7 +63,7 @@
     ; new tree = dad -> new-child, modify dad depth
     (let ((new-node (make-b node child-b depth-b)))
       (make-a child-a new-node (calc-depth new-node)))))
-(define (avl-tree-check-rotate node)
+(define (:avl-tree-check-rotate node)
   (with-avl-node node
                  (lambda (k v lc rc ld rd) (cond ((and (> ld rd)
                              (> (- ld rd) 1))
@@ -70,7 +76,7 @@
 (define (:avl-tree-insert-node node ckey cvalue less?)
  (if (not (avl-node? node))
   (make-avl-node ckey cvalue '() '() 0 0)
-   (avl-tree-check-rotate
+   (:avl-tree-check-rotate
     (let ((args (list node ckey cvalue less?)))
         (with-avl-node node
                        (lambda (k v lc rc ld rd) (if (less? ckey k)
@@ -78,6 +84,8 @@
                                   :make-left lc args)
                            (apply :avl-subtree-insert-node
                                   :make-right rc args))))))))
+
+
 (define (avl-tree-insert tree key value)
   (with-avl-tree tree
                  (lambda (r l e) (make-avl-tree
@@ -97,3 +105,24 @@
  ))
  (lookup (avl-root tree))
 ))
+(define (avl-tree-fold tree proc acc)
+ (define (tree-fold node acc) (
+  if (not (avl-node? node))
+   acc
+   (with-avl-node node (lambda (k v lc rc ld rd) (
+    let* ((l-val (tree-fold lc acc))
+           (c-val (proc k v l-val))
+           (r-val (tree-fold rc c-val))) r-val)))
+ ))
+ (tree-fold (avl-root tree) acc)
+)
+(define (avl-tree-max-value tree)
+  (avl-tree-fold tree (lambda (k v a) (max v a)) 0))
+(define (avl-tree-remove-key tree key)
+  (avl-tree-fold tree (lambda (k v t) (
+   if (not (eq? k key)) (avl-tree-insert t k v) t))
+                 (make-empty-avl-tree (avl-less tree)
+                                      (avl-equ tree))))
+(define (avl-tree-flatten-print tree)
+ (avl-tree-fold tree (lambda (k v a) (display k) (display " ")) 0)
+)
