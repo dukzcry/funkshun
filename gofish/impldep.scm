@@ -5,5 +5,5 @@
 
 (define fold-left fold)
 (define ndisplay (
-	lambda pack (display pack) (newline)
+ lambda pack (display pack) (newline)
 ))
