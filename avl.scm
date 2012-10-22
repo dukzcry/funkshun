@@ -5,25 +5,27 @@
 (use srfi-9) ; record types
 
 (define-record-type avl-tree (make-avl-tree root less? equ?) avl-tree?
-  (root avl-root)
-  (less? avl-less)
-  (equ? avl-equ)
+ (root avl-root)
+ (less? avl-less)
+ (equ? avl-equ)
 )
-(define-record-type avl-node (make-avl-node key value l-child r-child l-depth r-depth) avl-node?
-  (key avl-key)
-  (value avl-value)
-  (l-child avl-l-child) (r-child avl-r-child)
-  (l-depth avl-l-depth) (r-depth avl-r-depth)
+(define-record-type avl-node (make-avl-node key value l-child r-child l-depth r-depth) 
+ avl-node?
+ (key avl-key)
+ (value avl-value)
+ (l-child avl-l-child) (r-child avl-r-child)
+ (l-depth avl-l-depth) (r-depth avl-r-depth)
 )
 (define (with-avl-tree tree func) (
  func (avl-root tree) (avl-less tree) (avl-equ tree)
 ))
 (define (with-avl-node node func) (
- func (avl-key node) (avl-value node) (avl-l-child node) (avl-r-child node) (avl-l-depth node) (avl-r-depth node)
+ func (avl-key node) (avl-value node) (avl-l-child node) (avl-r-child node) 
+ (avl-l-depth node) (avl-r-depth node)
 ))
 
 (define (make-empty-avl-tree less? equ?)
-  (make-avl-tree '() less? equ?))
+ (make-avl-tree '() less? equ?))
 (define (:make-left node child depth)
  (with-avl-node node
                  (lambda (k v lc rc ld rd) (make-avl-node k v child rc depth rd))))
@@ -38,15 +40,15 @@
     (make-proc node new-child (calc-depth new-child))))
 
 (define :rotate-right-set (list :make-right
-                               avl-l-child
-                               :make-left
-                               avl-r-child
-                               avl-r-depth))
+                                avl-l-child
+                                :make-left
+                                avl-r-child
+                                avl-r-depth))
 (define :rotate-left-set  (list :make-left
-                               avl-r-child
-                               :make-right
-                               avl-l-child
-                               avl-l-depth))
+                                avl-r-child
+                                :make-right
+                                avl-l-child
+                                avl-l-depth))
 (define (:avl-tree-rotate node make-a get-child-a make-b get-child-b get-depth-b)
   (let* ((child-a (get-child-a node))
          (child-b (get-child-b child-a))
