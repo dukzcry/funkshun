@@ -73,25 +73,31 @@
                         (apply :avl-tree-rotate node :rotate-left-set))
                        (else node)))))
 
-(define (:avl-tree-insert-node node ckey cvalue less?)
- (if (not (avl-node? node))
-  (make-avl-node ckey cvalue '() '() 0 0)
+(define (:avl-tree-insert-node node ckey value-proc less? equ?) (
+ if (not (avl-node? node))
+  (make-avl-node ckey (value-proc '()) '() '() 0 0)
    (:avl-tree-check-rotate
-    (let ((args (list node ckey cvalue less?)))
-        (with-avl-node node
-                       (lambda (k v lc rc ld rd) (if (less? ckey k)
-                           (apply :avl-subtree-insert-node
-                                  :make-left lc args)
-                           (apply :avl-subtree-insert-node
-                                  :make-right rc args))))))))
+    (let ((args (list node ckey value-proc less? equ?)))
+        (with-avl-node node (lambda (k v lc rc ld rd) (
+                           cond ((equ? ckey k)
+                                  (make-avl-node k (value-proc v) lc rc ld rd)) 
+                                ((less? ckey k)
+                                  (apply :avl-subtree-insert-node
+                                         :make-left lc args))
+                                 (else
+                                  (apply :avl-subtree-insert-node
+                                         :make-right rc args)))))
+   ))
+))
 
-
-(define (avl-tree-insert tree key value)
+(define (avl-tree-replace tree key value-proc)
   (with-avl-tree tree
                  (lambda (r l e) (make-avl-tree
-                  (:avl-tree-insert-node r key value l)
+                  (:avl-tree-insert-node r key value-proc l e)
                   l
                   e))))
+(define (avl-tree-insert tree key value)
+  (avl-tree-replace tree key (lambda (x) value)))
 (define (avl-tree-lookup tree ckey) (
  let ((equ? (avl-equ tree))
       (less? (avl-less tree)))
@@ -105,6 +111,7 @@
  ))
  (lookup (avl-root tree))
 ))
+
 (define (avl-tree-fold tree proc acc)
  (define (tree-fold node acc) (
   if (not (avl-node? node))
@@ -123,6 +130,6 @@
    if (not (eq? k key)) (avl-tree-insert t k v) t))
                  (make-empty-avl-tree (avl-less tree)
                                       (avl-equ tree))))
-(define (avl-tree-flatten-print tree)
+(define (avl-tree-print-flatten tree)
  (avl-tree-fold tree (lambda (k v a) (display k) (display " ")) 0)
 )
