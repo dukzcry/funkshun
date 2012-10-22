@@ -1,5 +1,6 @@
 (define deck '())
 (define (set-deck!) (set! deck (make-deck)))
+(define user-asked-pile '())
 
 (define (game)
  (set-deck!)
