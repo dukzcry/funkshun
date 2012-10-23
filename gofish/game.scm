@@ -1,9 +1,12 @@
 (define deck '())
 (define (set-deck!) (set! deck (make-deck)))
 (define user-asked-pile '())
+(define (set-user-asked-pile!) 
+ (set! user-asked-pile (make-empty-avl-tree string<? string=?)))
 
 (define (game)
  (set-deck!)
+ (set-user-asked-pile!)
  (define computer-score 0)
  (define user-score 0)
  (let ((piles (init-piles (lambda (x) (append x (pop))) (lambda (x) (append x (pop)))

@@ -77,3 +77,30 @@
  ))
  (init-pile 1 '() '())
 )
+
+
+(define (:rank->string rank) (
+ if (number? rank)
+  (number->string rank)
+  (symbol->string rank)
+))
+(define (:string->rank string) (
+ let ((num (string->number string)))
+  (if num
+  num
+  (string->symbol string))
+))
+(define (tree-insert tree key)
+  (avl-tree-replace tree (:rank->string key) 
+   (lambda (x) (if (null? x) 1
+    (+ x 1)
+   ))
+))
+(define (tree-remove tree key)
+ avl-tree-remove-key tree (:rank->string key))
+(define (tree-find tree key) (
+ :string->rank (avl-tree-lookup tree (:rank->string key))
+))
+(define (tree-max-val tree) (
+  :string->rank (avl-tree-max-value tree)
+))
