@@ -21,29 +21,28 @@
   (else (any-cards-of? rank (cdr pile)))
  )
 )
-(define (send rank pile)
+(define send assoc-pile)
+; asked rank in first, other in rest
+(define (assoc-pile rank pile)
  (define rule `(eq? ',rank (get-rank x)))
  (define (filter-pile func) (eval `(filter (lambda (x) (,@func)) ',pile)))
  (cons (filter-pile rule) (filter-pile `(not ,rule)))
 )
-(define (draw pile)
+(define (sort-pile pile)
  (define (sort-filter p less) (sort (filter (lambda (x) (p (get-rank x))) pile) less))
- (ndisplay "your pile is:"
   (append (sort-filter number? (lambda (x y) (< (get-rank x) (get-rank y))))
   (sort-filter symbol? (lambda (x y) (string<? (symbol->string (get-rank x)) 
    (symbol->string (get-rank y))))))
-))
+)
 (define (book-ready? rank pile) (
- if (eq? (fold-left (
-  ; non associative
-  lambda (x count) (if (:rank-eq? rank x) (+ count 1) count)) 0 pile)
+ if (eq? (fold-left (lambda (x count) (if (:rank-eq? rank x) (+ count 1) count)) 0 pile)
      4) #t #f
 ))
 
-(define :ranks (append (iota 9 2) '(J Q K A)))
+(define +:ranks+ (append (iota 9 2) '(J Q K A)))
 (define (make-deck)
  (define (make-card rank suit) (cons rank suit))
- (define (pile suit) (map (lambda (x) (make-card x suit)) :ranks))
+ (define (pile suit) (map (lambda (x) (make-card x suit)) +:ranks+))
  (define (append-piles)
   (define (append-pile lst suits)
    (if (null? suits)
@@ -59,11 +58,12 @@
  )))
  (shuffle (append-piles))
 )
+; mutator
 (define (pop) (
- if (null? deck)
+ if (null? *deck*)
   '()
- (let ((top (car deck)))
-  (set! deck (cdr deck))
+ (let ((top (car *deck*)))
+  (set! *deck* (cdr *deck*))
   `(,top)
 )))
 
