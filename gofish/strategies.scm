@@ -8,7 +8,8 @@
 
 ; transparent, always returns rank
 (define (first-max pile)
- (define get-acc-rank cdr) ; for assoc
+ ;
+ (define get-acc-rank cdr)
  (define get-count car)
  (define (fold-left-custom proc acc list) (
   let ((rank (get-acc-rank (car acc))))
