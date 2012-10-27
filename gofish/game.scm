@@ -5,6 +5,19 @@
  (set! *user-asked-pile* (make-empty-avl-tree string<? string=?)))
 
 (define (game)
+ (define (loop first second)
+  (set! first (call/cc first))
+  (set! second (call/cc second))
+  (if (and (not (null? computer-pile)) (not (null? user-pile)))
+   (loop first second))
+ )
+ (define (computer-move parent) (let loop() 
+  ;
+  (set! parent (call/cc parent))(loop)))
+ (define (player-move parent) (let loop() 
+  ;
+  (set! parent (call/cc parent))(loop)))
+
  (set-deck!)
  (set-user-asked-pile!)
  (define computer-score 0)
@@ -17,6 +30,10 @@
  (ndisplay "your pile is:" (sort-pile user-pile))
  (let ((who (who-starts?)))
   (ndisplay who "starts first")
+  (if (eq? who 'computer)
+   (loop computer-move player-move)
+   (loop player-move computer-move))
  )
  ;(print-winner computer-score user-score)
-(game))
+;(game)
+)

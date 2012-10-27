@@ -1,6 +1,6 @@
 #| 1. take into account ranks the player asked for +
  (1.1.) note number of asks for each +
-(2.) ask ranks for which you have more cards at first +
+(2.) ask ranks for which you have most cards at first +
 3. don't ask for same card few times, if player didn't take from deck
  (4.) periodically ask for cards the player is aware you have
  (4.1.) s/periodically/count probability/
@@ -8,7 +8,7 @@
 
 ; transparent, always returns rank
 (define (first-max pile)
- ;
+ ; (r . c) -> (c . r) for assoc
  (define get-acc-rank cdr)
  (define get-count car)
  (define (fold-left-custom proc acc list) (
