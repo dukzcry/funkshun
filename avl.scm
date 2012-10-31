@@ -1,4 +1,4 @@
-; functional (without mutators) realization of AVL trees for >= R5RS implementations 
+; immutable realization of AVL trees for >= R5RS implementations 
 ; mostly copy-paste from http://swizard.info/articles/functional-data-structures.html#link12
 
 ; srfi instead of non-standard (define-record)
