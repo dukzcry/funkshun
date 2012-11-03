@@ -1,7 +1,7 @@
 (define (who-starts?) 
  (if (zero? ((lambda (num) (random-integer num)) 2)
-  ) 'computer 
-  'player
+  ) 'computer
+    'player
  )
 )
 (define print-winner (

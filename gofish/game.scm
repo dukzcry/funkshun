@@ -12,7 +12,13 @@
    (loop first second))
  )
  (define (computer-move parent) (let loop() 
-  ;
+  (let read-rank ((arg (assoc (read) user-pile)))
+    (if arg (get-rank arg)
+      (begin
+        (display "not found in pile")(newline)
+        (read-rank (assoc (read) user-pile))
+      )
+  ))
   (set! parent (call/cc parent))(loop)))
  (define (player-move parent) (let loop() 
   ;

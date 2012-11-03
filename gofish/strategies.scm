@@ -16,7 +16,8 @@
    (if (eq? (get-count (car acc)) 'max)
     rank
    (if (null? list)
-      (let ((res (assoc 2 acc)))
+      (let ((res (assoc 2 acc ;(reverse acc)
+        )))
        (if res (get-acc-rank res)
          rank
       ))
