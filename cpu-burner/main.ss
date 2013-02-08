@@ -26,7 +26,7 @@
 	(let ((cc (this-cc)))
 		(if cc
 			(begin
-				(set! *stop* (lambda () (cc #f))
+				(set! *stop* (lambda () (cc #f)))
 				((get-cc *tq*) '())))))
 (define (switch-task name val)
 	(let ((cc (this-cc)))
