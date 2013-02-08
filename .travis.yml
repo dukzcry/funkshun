@@ -1,0 +1,3 @@
+before_script: sudo apt-get install -qq chicken-bin
+script: csc avl.scm
+after_success: ./avl
