@@ -5,21 +5,9 @@ script:
   - csc avl.scm
   - cd ./cpu-burner && cc -c processing.c && csc processing.o main.ss
 after_success:
-  - ./avl
   - ./main
+  - cd .. && ./avl
 language: c
 compiler:
   - clang
   - gcc
-matrix:
-  exclude:
-    - after_success: ./avl
-      before_script: chicken-install bind >/dev/null
-      after_script: cd ./cpu-burner && cc -c processing.c && csc processing.o main.ss
-      after_success: ./main
-      language: c
-      compiler:
-        - clang
-        - gcc
-    - after_success: ./main
-      script: csc avl.scm
