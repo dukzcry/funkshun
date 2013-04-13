@@ -23,33 +23,34 @@ main(_) ->
 	Threads = Settings#settings.threads,
 	NZeroIncl = Threads - 1, NWOLast = NZeroIncl - 1,
 	Size = Parms#parms.limit div Threads, Delta = Parms#parms.limit - (Size * Threads),
-	[{I}] = [ {Clp} ||
-				Clp <- lists:seq(0,NWOLast),
-				part(Clp,Size,0) > NWOLast],
+	Range = lists:seq(0,NWOLast),
+	[I] = [ Clp ||
+				Clp <- Range,
+				part(Clp,Size,0) > NWOLast ],
 	part(I + 1,Size,Delta),
-	loop(),
+	loop(Range),
 	ok.
 
 part(N,S,D) ->
 	M = N * S,
 	Fragment = lists:seq(M + 1,M + S + D),
-	%Format = fun(X) ->
-		%io:format("Worker: ~w, Element: ~w~n", [N,X])
-    	%end,
-    	%lists:foreach(Format, Fragment),
-    	Pid = spawn(fun() -> worker({Fragment}) end),
-	register(N,Pid),
+    Pid = spawn(fun() -> worker({Fragment}) end),
+	register(list_to_atom(integer_to_list(N)),Pid),
 	N + 1.
 worker({L}) ->
-	io:format("Worker spawned~n"),
 	{ok,Handler} = ct_telnet:open(unix_telnet),
 	worker({Handler,L});
 worker({Handler,[X|Xs]}) ->
-	io:format("Sending data~n"),
 	{ok,_Result} = ct_telnet:cmd(Handler,"ls"),
 	worker({Handler,Xs});
 worker({Handler,[]}) ->
-	io:format("Finishing~n"),
 	ok = ct_telnet:close(Handler).
-loop() ->
-	loop().
+loop([N|Ns]) ->
+	Atom = list_to_atom(integer_to_list(N)),
+	case whereis(Atom) of
+		undefined -> L = [];
+		_ -> L = Ns ++ [N]
+	end,
+	loop(L);
+loop([]) ->
+	true.
