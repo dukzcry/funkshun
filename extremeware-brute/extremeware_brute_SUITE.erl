@@ -1,14 +1,10 @@
-%%! -enable smp
-% ct_run -suite
-
 -module(extremeware_brute_SUITE).
 -export([all/0,suite/0,main/1]).
 
 -record(settings,{contoaddr="localhost",login="login",passwd="pass",threads=5}).
 
--record(parms,{timeout=10,limit=500}).
+-record(parms,{limit=500}).
 
-% Global settings
 suite() ->
 	Settings = #settings{},
  	[{require, unix_telnet, unix}, 
@@ -23,19 +19,16 @@ main(_) ->
 	Threads = Settings#settings.threads,
 	NZeroIncl = Threads - 1, NWOLast = NZeroIncl - 1,
 	Size = Parms#parms.limit div Threads, Delta = Parms#parms.limit - (Size * Threads),
-	Range = lists:seq(0,NWOLast),
 	[I] = [ Clp ||
-				Clp <- Range,
+				Clp <- lists:seq(0,NWOLast),
 				part(Clp,Size,0) > NWOLast ],
 	part(I + 1,Size,Delta),
-	loop(Range),
-	ok.
+	loop().
 
 part(N,S,D) ->
 	M = N * S,
 	Fragment = lists:seq(M + 1,M + S + D),
-    Pid = spawn(fun() -> worker({Fragment}) end),
-	register(list_to_atom(integer_to_list(N)),Pid),
+	spawn_link(fun() -> worker({Fragment}) end),
 	N + 1.
 worker({L}) ->
 	{ok,Handler} = ct_telnet:open(unix_telnet),
@@ -45,12 +38,5 @@ worker({Handler,[X|Xs]}) ->
 	worker({Handler,Xs});
 worker({Handler,[]}) ->
 	ok = ct_telnet:close(Handler).
-loop([N|Ns]) ->
-	Atom = list_to_atom(integer_to_list(N)),
-	case whereis(Atom) of
-		undefined -> L = [];
-		_ -> L = Ns ++ [N]
-	end,
-	loop(L);
-loop([]) ->
-	true.
+loop() ->
+	loop().
