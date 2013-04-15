@@ -4,7 +4,7 @@
 -record(settings,{threads,limit,command,error}).
 
 suite() ->
-	ct:require(unix), ct:require(ew_telnet), ct:timetrap(infinity), [{silent_connections,[telnet]}].
+	ct:require(ew_telnet), [{timetrap,infinity},{silent_connections,[telnet]}].
 set_ew_defaults([{threads,Threads}|Ss],S) ->  
     set_ew_defaults(Ss,S#settings{threads=Threads});
 set_ew_defaults([{limit,Limit}|Ss],S) ->
@@ -78,7 +78,7 @@ loop([X|Xs]) ->
 		_ ->
 			%ct:pal("Someone finished early"),
 			[ LP ! stop || LP <- begin {links, P} = process_info(self(), links), P end ],
-			timer:sleep(5000),
+			timer:sleep(3000),
 			loop([])
 		after 0 ->
 			case whereis(X) of
