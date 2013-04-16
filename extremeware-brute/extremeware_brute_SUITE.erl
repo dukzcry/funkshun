@@ -20,23 +20,22 @@ all() -> [main].
 main(_) ->
 	process_flag(trap_exit, true),
 	Settings = set_ew_defaults(ct:get_config(extremeware),#settings{}),
-	Threads = Settings#settings.threads,
+	Threads = Settings#settings.threads, Limit = Settings#settings.limit,
 	NZeroIncl = Threads - 1, NWOLast = NZeroIncl - 1,
-	Size = Settings#settings.limit div Threads, Delta = Settings#settings.limit - (Size * Threads),
-	[I] = [ Clp ||
-				Clp <- lists:seq(0,NWOLast),
-				part(Clp,Size,0,Settings) > NWOLast ],
-	ct:pal("Generated fragments"),
-	part(I + 1,Size,Delta,Settings),
-	loop(lists:map(fun(X) -> list_to_atom([X]) end,lists:seq(0,NZeroIncl))).
+	Size = Limit div Threads, Delta = Limit - (Size * Threads),
+	%[I] = [ Clp ||
+	%			Clp <- lists:seq(0,NWOLast),
+	%			part(Clp,Size,0,Settings) > NWOLast ],
+	%ct:pal("Generated fragments"),
+	Pids = lists:map(fun(X) -> part(X,Size,0,Settings) end,lists:seq(0,NWOLast)),
+	Last = part(NZeroIncl,Size,Delta,Settings),
+	loop([Last|Pids]).
 
 part(N,S,D,Settings) ->
 	M = N * S,
 	Fragment = lists:seq(M + 1,M + S + D),
 	%timer:sleep(1000),
-	Pid = spawn_link(fun() -> worker({Fragment},Settings) end),
-	register(list_to_atom([N]),Pid),
-	N + 1.
+	spawn_link(fun() -> worker({Fragment},Settings) end).
 worker({L},Settings) ->
 	receive
 		_ ->
@@ -69,23 +68,21 @@ worker({Handler,[]},_) ->
 loop([X|Xs]) ->
 	receive
 		{_,Pid,normal} ->
-			%ct:pal("~w finished normally",[Pid]),
-			case whereis(X) of
-				undefined -> L = Xs;
-				_ -> L = Xs ++ [X]
-			end,
-			loop(L);
+			%ct:pal("~w finished normally",[X]),
+			loop(Xs);
 		_ ->
-			%ct:pal("Someone finished early"),
-			[ LP ! stop || LP <- begin {links, P} = process_info(self(), links), P end ],
+			%ct:pal("~w finished early",[X]),
+			%[ LP ! stop || LP <- begin {links, P} = process_info(self(), links), P end ],
+			lists:apply(fun(X) -> X ! stop end,Xs),
 			timer:sleep(3000),
 			loop([])
 		after 0 ->
-			case whereis(X) of
-				undefined -> L = Xs;
-				_ -> L = Xs ++ [X]
-			end,
-			loop(L)
+			loop([X|Xs])
 	end;
 loop([]) ->
 	true.
+check([X|Xs]) ->
+	case is_process_alive(X) of
+		false -> Xs;
+		true -> Xs ++ [X]
+	end.
