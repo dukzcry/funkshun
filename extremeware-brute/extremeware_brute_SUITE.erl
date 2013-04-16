@@ -65,19 +65,19 @@ worker({Handler,[X|Xs]},Settings) ->
 	end;
 worker({Handler,[]},_) ->
 	ct_telnet:close(Handler), true.
-loop([X|Xs]) ->
+loop(L) ->
 	receive
 		{_,Pid,normal} ->
-			%ct:pal("~w finished normally",[X]),
-			loop(Xs);
+			%ct:pal("~w finished normally",[Pid]),
+			loop(check(L));
 		_ ->
-			%ct:pal("~w finished early",[X]),
+			%ct:pal("Someone finished early"),
 			%[ LP ! stop || LP <- begin {links, P} = process_info(self(), links), P end ],
 			lists:apply(fun(X) -> X ! stop end,Xs),
 			timer:sleep(3000),
 			loop([])
 		after 0 ->
-			loop([X|Xs])
+			loop(check(L))
 	end;
 loop([]) ->
 	true.
