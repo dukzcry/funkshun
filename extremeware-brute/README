@@ -1,6 +1,6 @@
 On device:
-telnet disable
-telnet enable
+disable telnet
+enable telnet
 configure log filter "DefaultFilter" add exclude events "All"
 
 On host:
