@@ -1,7 +1,7 @@
 -module(extremeware_brute_SUITE).
 -export([all/0,suite/0,main/1]).
 
--record(settings,{threads,limit,command,error}).
+-record(settings,{threads,limit,command,error,error_mp=undefined}).
 
 suite() ->
 	ct:require(ew_telnet), [{timetrap,infinity},{silent_connections,[telnet]}].
@@ -19,7 +19,9 @@ set_ew_defaults([],S) ->
 all() -> [main].
 main(_) ->
 	process_flag(trap_exit, true),
-	Settings = set_ew_defaults(ct:get_config(extremeware),#settings{}),
+	PreSettings = set_ew_defaults(ct:get_config(extremeware),#settings{}),
+	{ok,Mp} = re:compile(PreSettings#settings.error,[firstline]),
+	Settings = PreSettings#settings{error_mp=Mp},
 	Threads = Settings#settings.threads, Limit = Settings#settings.limit,
 	NZeroIncl = Threads - 1, NWOLast = NZeroIncl - 1,
 	Size = Limit div Threads, Delta = Limit - (Size * Threads),
@@ -35,10 +37,12 @@ part(N,S,D,Settings) ->
 	M = N * S,
 	Fragment = lists:seq(M + 1,M + S + D),
 	%timer:sleep(1000),
-	spawn_link(fun() -> worker({Fragment},Settings) end).
+	Pid = spawn_link(fun() -> worker({Fragment},Settings) end),
+	ct:pal("Thread ~w starts at ~w",[Pid,M + 1]),
+	Pid.
 worker({L},Settings) ->
 	receive
-		_ ->
+		stop ->
 			%ct:pal("Halting"),
 			true
 		after 0 ->
@@ -47,37 +51,41 @@ worker({L},Settings) ->
 	end;
 worker({Handler,[X|Xs]},Settings) ->
 	receive
-		_ ->
+		stop ->
 			%ct:pal("Halting on ~w",[X]),
 			worker({Handler,[]},Settings)
 		after 0 ->
 			%timer:sleep(500),
 			ok = ct_telnet:sendf(Handler,"~s ~B",[Settings#settings.command,X]),
 			{ok,Data} = ct_telnet:get_data(Handler),
-			case re:run(Data,Settings#settings.error,[]) of
-				{match,_} ->
-					worker({Handler,Xs},Settings);
-				_ when Data =/= [] ->
-					ct:pal("Done! ~s",[Data]), ct_telnet:close(Handler), Data = fail;
-				_ when Data == [] ->
-					worker({Handler,[X|Xs]},Settings)
+			case Data of
+				[] ->
+					% May stuck in loop :\
+					worker({Handler,[X|Xs]},Settings);
+				_ ->
+					case re:run(Data,Settings#settings.error_mp,[{capture,none}]) of
+						match ->
+							worker({Handler,Xs},Settings);
+						_ ->
+							ct:pal("Done! ~s",[Data]), ct_telnet:close(Handler), Data = fail
+					end
 			end
 	end;
 worker({Handler,[]},_) ->
 	ct_telnet:close(Handler), true.
-loop(L) ->
+loop([X|Xs]) ->
 	receive
 		{_,Pid,normal} ->
 			%ct:pal("~w finished normally",[Pid]),
-			loop(check(L));
-		_ ->
-			%ct:pal("Someone finished early"),
+			loop(check([X|Xs]));
+		{_,Pid,_} ->
+			%ct:pal("~w finished early",[Pid]),
 			%[ LP ! stop || LP <- begin {links, P} = process_info(self(), links), P end ],
-			lists:apply(fun(X) -> X ! stop end,Xs),
+			lists:foreach(fun(Y) -> Y ! stop end,[X|Xs]),
 			timer:sleep(3000),
 			loop([])
 		after 0 ->
-			loop(check(L))
+			loop(check([X|Xs]))
 	end;
 loop([]) ->
 	true.
