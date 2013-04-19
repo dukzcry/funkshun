@@ -36,12 +36,12 @@ main(_) ->
 part(N,S,D,Settings) ->
 	M = N * S,
 	Fragment = lists:seq(M + 1,M + S + D),
-	FragmentOptimized = lists:map(fun(X) ->
-		lists:reverse(string:right(integer_to_list(X),Settings#settings.positions,$0)) end,Fragment),
+	%FragmentOptimized = lists:map(fun(X) ->
+	%	lists:reverse(string:right(integer_to_list(X),Settings#settings.positions,$0)) end,Fragment),
 	%timer:sleep(1000),
-	Pid = spawn_link(fun() -> worker({FragmentOptimized},Settings) end),
-	[F|_] = FragmentOptimized,
-	ct:pal("Thread ~w starts at ~s (~w)",[Pid,F,M + 1]),
+	Pid = spawn_link(fun() -> worker({Fragment},Settings) end),
+	%[F|_] = FragmentOptimized,
+	ct:pal("Thread ~w starts at ~w",[Pid,M + 1]),
 	Pid.
 worker({L},Settings) ->
 	receive
@@ -55,23 +55,17 @@ worker({L},Settings) ->
 worker({Handler,[X|Xs]},Settings) ->
 	receive
 		stop ->
-			%ct:pal("Halting on ~s",[X]),
+			%ct:pal("Halting on ~w",[X]),
 			worker({Handler,[]},Settings)
 		after 0 ->
 			%timer:sleep(500),
-			ok = ct_telnet:sendf(Handler,"~s ~s",[Settings#settings.command,X]),
-			{ok,Data} = ct_telnet:get_data(Handler),
-			case Data of
-				[] ->
-					% May stuck in loop :\
-					worker({Handler,[X|Xs]},Settings);
+			{ok,Data} = ct_telnet:cmdf(Handler,"~s ~B",[Settings#settings.command,X]),
+			case re:run(Data,Settings#settings.error_mp,[{capture,none}]) of
+				match ->
+					worker({Handler,Xs},Settings);
 				_ ->
-					case re:run(Data,Settings#settings.error_mp,[{capture,none}]) of
-						match ->
-							worker({Handler,Xs},Settings);
-						_ ->
-							ct:pal("Done! ~s",[Data]), ct_telnet:close(Handler), Data = fail
-					end
+					ct:pal("Done! ~s",[Data]), ct_telnet:close(Handler), Data = fail
+				end
 			end
 	end;
 worker({Handler,[]},_) ->

