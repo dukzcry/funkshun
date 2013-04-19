@@ -3,5 +3,3 @@ configure log filter "DefaultFilter" add exclude events "All"
 
 On host:
 change settings in .cfg, then ./run.sh
-
-Please use ssh version whenever it's possible, it's tons times faster, as there is a very low pty count (telnet) on Extreme hardware, while ssh has no such limitations.
