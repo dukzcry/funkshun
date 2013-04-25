@@ -1,0 +1,103 @@
+--- ssh_transport.hrl.orig	2013-04-25 12:52:01.000000000 +0400
++++ ssh_transport.hrl	2013-04-25 13:01:35.000000000 +0400
+@@ -83,6 +83,8 @@
+ 	{
+ 	  name     %% string
+ 	 }).
++-record(ssh_msg_service_accept_buggy,
++        {}).
+ 
+ -record(ssh_msg_kexinit,
+ 	{
+--- ssh_connection_handler.erl.orig	2013-04-25 12:41:39.000000000 +0400
++++ ssh_connection_handler.erl	2013-04-25 13:33:19.000000000 +0400
+@@ -310,10 +310,12 @@ userauth(#ssh_msg_service_request{name =
+ 						  language = "en"}, State)
+     end;
+ 
+-userauth(#ssh_msg_service_accept{name = "ssh-userauth"},  
++userauth(Reply,  
+ 	 #state{ssh_params = #ssh{role = client,
+ 				  service = "ssh-userauth"} = Ssh0} = 
+-	 State) ->
++	 State) when (Reply == #ssh_msg_service_accept{name = "ssh-userauth"}) or
++		     % buggy server: service_accept w/o service
++		     (Reply == #ssh_msg_service_accept_buggy{}) ->
+     {Msg, Ssh} = ssh_auth:init_userauth_request_msg(Ssh0),
+     send_msg(Msg, State),
+     {next_state, userauth, next_packet(State#state{ssh_params = Ssh})};
+--- ssh_transport.erl.orig	2013-04-25 12:31:45.000000000 +0400
++++ ssh_transport.erl	2013-04-25 13:55:45.000000000 +0400
+@@ -92,6 +92,8 @@ transport_messages(_) ->
+ 
+      {ssh_msg_service_accept, ?SSH_MSG_SERVICE_ACCEPT,
+       [string]},
++     {ssh_msg_service_accept_buggy, ?SSH_MSG_SERVICE_ACCEPT,
++      []},
+      
+      {ssh_msg_kexinit, ?SSH_MSG_KEXINIT,
+       [cookie,
+@@ -223,8 +225,9 @@ kexinit_messsage(client, Random, Compres
+ 		  server_host_key_algorithms = HostKeyAlgs,
+ 		  encryption_algorithms_client_to_server = ["aes128-cbc","3des-cbc"],
+ 		  encryption_algorithms_server_to_client = ["aes128-cbc","3des-cbc"],
+-		  mac_algorithms_client_to_server = ["hmac-sha1"],
+-		  mac_algorithms_server_to_client = ["hmac-sha1"],
++		  % Supported: hmac-md5,md5-8,none. hmac-md5 behaves badly
++		  mac_algorithms_client_to_server = ["hmac-sha1","none"],
++		  mac_algorithms_server_to_client = ["hmac-sha1","none"],
+ 		  compression_algorithms_client_to_server = Compression,
+ 		  compression_algorithms_server_to_client = Compression,
+ 		  languages_client_to_server = [],
+@@ -350,7 +353,7 @@ handle_kexdh_reply(#ssh_msg_kexdh_reply{
+     K = ssh_math:ipow(F, Private, P),
+     H = kex_h(Ssh0, HostKey, Public, F, K),
+ 
+-    case verify_host_key(Ssh0, HostKey, H, H_SIG) of
++    case verify_host_key(Ssh0, HostKey, H, H_SIG, false) of
+ 	ok ->
+ 	    {SshPacket, Ssh} = ssh_packet(#ssh_msg_newkeys{}, Ssh0),
+ 	    {ok, SshPacket, Ssh#ssh{shared_secret  = K,
+@@ -383,7 +386,7 @@ handle_kex_dh_gex_reply(#ssh_msg_kex_dh_
+     K = ssh_math:ipow(F, Private, P),
+     H = kex_h(Ssh0, HostKey, Min, NBits, Max, P, G, Public, F, K),
+ 
+-    case verify_host_key(Ssh0, HostKey, H, H_SIG) of
++    case verify_host_key(Ssh0, HostKey, H, H_SIG, true) of
+ 	ok ->
+ 	    {SshPacket, Ssh} = ssh_packet(#ssh_msg_newkeys{}, Ssh0),
+ 	    {ok, SshPacket, Ssh#ssh{shared_secret  = K,
+@@ -429,13 +432,14 @@ sign_host_key(_Ssh, #'DSAPrivateKey'{} =
+     RawSignature = sign(H, Hash, Private),
+     ssh_bits:encode(["ssh-dss", RawSignature],[string, binary]).
+ 
+-verify_host_key(SSH, K_S, H, H_SIG) ->
++verify_host_key(SSH, K_S, H, H_SIG, Verify0) ->
+     ALG = SSH#ssh.algorithms,
+     case ALG#alg.hkey of
+ 	'ssh-rsa' ->
+ 	    verify_host_key_rsa(SSH, K_S, H, H_SIG);
+ 	'ssh-dss' ->
+-	    verify_host_key_dss(SSH, K_S, H, H_SIG);
++	    HasSigBlobBug = (Verify0 == false) andalso (SSH#ssh.c_vsn == {2,0}),
++	    verify_host_key_dss(SSH, K_S, H, H_SIG, HasSigBlobBug);
+ 	_ ->
+ 	    {error, bad_host_key_algorithm}
+     end.
+@@ -455,7 +459,15 @@ verify_host_key_rsa(SSH, K_S, H, H_SIG) 
+ 	    {error, bad_format}
+     end.
+ 
+-verify_host_key_dss(SSH, K_S, H, H_SIG) ->
++verify_host_key_dss(SSH, K_S, _, _, true) ->
++    case ssh_bits:decode(K_S,[string,mpint,mpint,mpint,mpint]) of
++        ["ssh-dss",P,Q,G,Y] ->
++            Public = {Y,  #'Dss-Parms'{p = P, q = Q, g = G}},
++            known_host_key(SSH, Public, "ssh-dss");
++        _ ->
++            {error, bad_host_key_format}
++    end;
++verify_host_key_dss(SSH, K_S, H, H_SIG, false) ->
+     case ssh_bits:decode(K_S,[string,mpint,mpint,mpint,mpint]) of
+ 	["ssh-dss",P,Q,G,Y] ->
+ 	    ["ssh-dss",SIG] = ssh_bits:decode(H_SIG,[string,binary]),
