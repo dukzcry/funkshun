@@ -3,14 +3,3 @@ Patching Erlang
 cd $ERL_LIBS/ssh-2.1.2/src
 patch < ssh-ewcompat.diff
 erlc -I ../include/ -o ../ebin/ ssh_transport.erl ssh_connection_handler.erl
-
-Compiling
----------
-
-    make
-
-Running
--------
-
-    erl -pa ebin
-    application:start(extremeware_brute).
