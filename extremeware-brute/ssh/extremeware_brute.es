@@ -11,23 +11,23 @@
 main([ConToAddr,Port,User,Pass,Threads]) ->
     process_flag(trap_exit, true), crypto:start(), ssh:start(),
     N = list_to_integer(Port), T = list_to_integer(Threads),
-	PreSettings = #settings{},
+    PreSettings = #settings{},
     {ok,Mp} = re:compile(PreSettings#settings.error),
-	Limit = PreSettings#settings.limit,
-	NZeroIncl = T - 1, NWOLast = NZeroIncl - 1,
-	Size = Limit div T, Delta = Limit - (Size * T),
-	%[I] = [ Clp ||
-	%			Clp <- lists:seq(0,NWOLast),
-	%			part(Clp,Size,0,Settings) > NWOLast ],
-	%io:format("Generated fragments~n"),
+    Limit = PreSettings#settings.limit,
+    NZeroIncl = T - 1, NWOLast = NZeroIncl - 1,
+    Size = Limit div T, Delta = Limit - (Size * T),
+    %[I] = [ Clp ||
+    %			Clp <- lists:seq(0,NWOLast),
+    %			part(Clp,Size,0,Settings) > NWOLast ],
+    %io:format("Generated fragments~n"),
     {ok,Handle} = ssh:connect(ConToAddr,N,[{user,User}
         % Interactive asking fails
         ,{password,Pass}
         |PreSettings#settings.ssh]),
     Settings = PreSettings#settings{error_mp=Mp,ssh_conn=Handle},
-	Pids = lists:map(fun(X) -> part(X,Size,0,Settings) end,lists:seq(0,NWOLast)),
-	Last = part(NZeroIncl,Size,Delta,Settings),
-	loop([Last|Pids],Settings);
+    Pids = lists:map(fun(X) -> part(X,Size,0,Settings) end,lists:seq(0,NWOLast)),
+    Last = part(NZeroIncl,Size,Delta,Settings),
+    loop([Last|Pids],Settings);
 main(_) ->
     io:format("~s Host Port Login Pass 10\n", [escript:script_name()]),
     halt(1).
@@ -81,7 +81,7 @@ worker({Handler,[X|Xs]},Settings) ->
                 match ->
                     worker({Handler,Xs},Settings);
                 _ ->
-                    io:format("Done! ~s~n",[Data]), 
+                    if Data /= [] -> io:format("Done! ~s~n",[Data]) end, 
                     ssh_connection:close(Settings#settings.ssh_conn,Handler), Data = Status
             end
     end;
