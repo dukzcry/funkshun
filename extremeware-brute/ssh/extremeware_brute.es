@@ -10,7 +10,7 @@
 
 main([ConToAddr,Port,User,Pass,Threads]) ->
     process_flag(trap_exit, true), crypto:start(), ssh:start(),
-	N = list_to_integer(Port), T = list_to_integer(Threads),
+    N = list_to_integer(Port), T = list_to_integer(Threads),
 	PreSettings = #settings{},
     {ok,Mp} = re:compile(PreSettings#settings.error),
 	Limit = PreSettings#settings.limit,
@@ -29,16 +29,16 @@ main([ConToAddr,Port,User,Pass,Threads]) ->
 	Last = part(NZeroIncl,Size,Delta,Settings),
 	loop([Last|Pids],Settings);
 main(_) ->
-	io:format("usage: factorial integer\n"),
+    io:format("~s Host Port Login Pass 10\n", [escript:script_name()]),
     halt(1).
 
 loop([X|Xs],Settings) ->
     receive
         {_,Pid,normal} ->
-            io:format("~w finished normally~n",[Pid]),
+            %io:format("~w finished normally~n",[Pid]),
             loop(check([X|Xs]),Settings);
         {_,Pid,_} ->
-            io:format("~w finished early~n",[Pid]),
+            %io:format("~w finished early~n",[Pid]),
             %[ LP ! stop || LP <- begin {links, P} = process_info(self(), links), P end ],
             lists:foreach(fun(Y) -> Y ! stop end,[X|Xs]),
             timer:sleep(3000),
@@ -58,11 +58,11 @@ part(N,S,D,Settings) ->
 worker({L},Settings) ->
     receive
         stop ->
-            io:format("Halting~n"),
+            %io:format("Halting~n"),
             true
         after 0 ->
             {ok,Handler} = ssh_connection:session_channel(Settings#settings.ssh_conn,infinity),
-            success = ssh_connection:open_pty(Settings#settings.ssh_conn,Handler,"dumb",80,24,[],infinity),
+            success = ssh_connection:open_pty(Settings#settings.ssh_conn,Handler,"dumb",1,1,[],infinity),
             ok = ssh_connection:shell(Settings#settings.ssh_conn,Handler),
             {ok,_Prompt} = ssh_loop(Settings#settings.ssh_conn,Handler,[]),
             worker({Handler,L},Settings)
@@ -70,7 +70,7 @@ worker({L},Settings) ->
 worker({Handler,[X|Xs]},Settings) ->
     receive
         stop ->
-            io:format("Halting on ~w~n",[X]),
+            %io:format("Halting on ~w~n",[X]),
             worker({Handler,[]},Settings)
         after 0 ->
             %timer:sleep(500),
@@ -102,8 +102,8 @@ ssh_loop(SSH,Chn,Data) ->
             %{ok,Data};
         stop ->
             {ok,Data};
-        _State ->
-            io:format("State: ~w~n", [_State]),
+        State ->
+            %io:format("State: ~w~n", [State]),
             {fail,[]}
         after ?CMD_TIMEOUT ->
             {ok,Data}
