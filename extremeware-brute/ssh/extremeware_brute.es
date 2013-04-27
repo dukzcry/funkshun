@@ -24,9 +24,11 @@ main([ConToAddr,Port,User,Pass,Threads]) ->
         ,{password,Pass}
         |PreSettings#settings.ssh]),
     Settings = PreSettings#settings{error_mp=Mp,ssh_conn=Handle},
+    io:format("~w~w~n", [date(),time()]),
     Pids = lists:map(fun(X) -> part(X,Size,0,Settings) end,lists:seq(0,NWOLast)),
     Last = part(NZeroIncl,Size,Delta,Settings),
-    loop([Last|Pids],Settings);
+    loop([Last|Pids],Settings),
+    io:format("~w~w~n", [date(),time()]);
 main(_) ->
     io:format("~s Host Port Login Pass 10\n", [escript:script_name()]),
     halt(1).
@@ -80,8 +82,9 @@ worker({Handler,[X|Xs]},Settings) ->
                 match ->
                     worker({Handler,Xs},Settings);
                 _ ->
-                    if Data /= [] -> io:format("Done! ~s~n",[Data]) end, 
+                    if Data /= [] -> io:format("Done! ~s~n",[Data]); true -> 
                     ssh_connection:close(Settings#settings.ssh_conn,Handler), Data = Status
+                    end
             end
     end;
 worker({Handler,[]},Settings) ->
