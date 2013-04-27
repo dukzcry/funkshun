@@ -2,9 +2,8 @@
 %%! -smp enable
 -mode(native).
 
--define(CMD_TIMEOUT,1000).
 -record(settings,{limit=9999999,command="enable license fullL3 ",error="ERROR",
-	  ssh=[{silently_accept_hosts,true},{connect_timeout,10000},{compression,none}],
+	ssh=[{silently_accept_hosts,true},{connect_timeout,10000},{compression,none}],
 
         error_mp=undefined,ssh_conn=undefined}).
 
@@ -75,7 +74,7 @@ worker({Handler,[X|Xs]},Settings) ->
         after 0 ->
             %timer:sleep(500),
             ok = ssh_connection:send(Settings#settings.ssh_conn,Handler,
-				Settings#settings.command++integer_to_list(X)++"\n",?CMD_TIMEOUT),
+				Settings#settings.command++integer_to_list(X)++"\n",10000),
             {Status,Data} = ssh_loop(Settings#settings.ssh_conn,Handler,[]),
             case re:run(Data,Settings#settings.error_mp,[{capture,none}]) of
                 match ->
@@ -105,6 +104,6 @@ ssh_loop(SSH,Chn,Data) ->
         State ->
             %io:format("State: ~w~n", [State]),
             {fail,[]}
-        after ?CMD_TIMEOUT ->
+        after 700 ->
             {ok,Data}
     end.
