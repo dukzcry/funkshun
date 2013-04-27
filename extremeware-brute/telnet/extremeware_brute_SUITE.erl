@@ -64,8 +64,7 @@ worker({Handler,[X|Xs]},Settings) ->
 				match ->
 					worker({Handler,Xs},Settings);
 				_ ->
-					if Data /= [] -> ct:pal("Done! ~s",[Data]) end, 
-					ct_telnet:close(Handler), Data = ok
+					ct:pal("Done! ~s",[Data]), ct_telnet:close(Handler), Data = ok
 			end
 	end;
 worker({Handler,[]},_) ->
