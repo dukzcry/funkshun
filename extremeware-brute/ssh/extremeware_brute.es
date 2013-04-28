@@ -2,7 +2,7 @@
 %%! -smp enable
 -mode(native).
 
--record(settings,{limit=9999999,command="enable license fullL3 ",error="shit",
+-record(settings,{limit=9999999,command="enable license fullL3 ",error="ERROR",
 	ssh=[{silently_accept_hosts,true},{connect_timeout,10000},{compression,none}],
 
         error_mp=undefined,ssh_conn=undefined}).
