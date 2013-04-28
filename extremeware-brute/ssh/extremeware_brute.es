@@ -2,7 +2,7 @@
 %%! -smp enable
 -mode(native).
 
--record(settings,{limit=9999999,command="enable license fullL3 ",error="ERROR",
+-record(settings,{limit=9999999,command="enable license fullL3 ",error="shit",
 	ssh=[{silently_accept_hosts,true},{connect_timeout,10000},{compression,none}],
 
         error_mp=undefined,ssh_conn=undefined}).
@@ -82,9 +82,8 @@ worker({Handler,[X|Xs]},Settings) ->
                 match ->
                     worker({Handler,Xs},Settings);
                 _ ->
-                    if Data /= [] -> io:format("Done! ~s~n",[Data]); true -> 
+                    if Data /= [] -> io:format("Done! ~s~n",[Data]); true -> true end,
                     ssh_connection:close(Settings#settings.ssh_conn,Handler), Data = Status
-                    end
             end
     end;
 worker({Handler,[]},Settings) ->
