@@ -3,9 +3,9 @@
 -mode(native).
 
 -record(settings,{limit=9999999,command="enable license fullL3 ",error="ERROR",
-	ssh=[{silently_accept_hosts,true},{connect_timeout,10000},{compression,none}],
+	recv_timeout=700,ssh=[{silently_accept_hosts,true},{connect_timeout,10000},{compression,none}],
 
-        error_mp=undefined,ssh_conn=undefined}).
+    error_mp=undefined,ssh_conn=undefined}).
 
 main([ConToAddr,Port,User,Pass,Threads]) ->
     process_flag(trap_exit, true), crypto:start(), ssh:start(),
@@ -65,7 +65,7 @@ worker({L},Settings) ->
             {ok,Handler} = ssh_connection:session_channel(Settings#settings.ssh_conn,infinity),
             success = ssh_connection:open_pty(Settings#settings.ssh_conn,Handler,"dumb",1,1,[],infinity),
             ok = ssh_connection:shell(Settings#settings.ssh_conn,Handler),
-            {ok,_Prompt} = ssh_loop(Settings#settings.ssh_conn,Handler,[]),
+            {ok,_Prompt} = ssh_loop(Settings#settings.ssh_conn,Handler,[],Settings),
             worker({Handler,L},Settings)
     end;
 worker({Handler,[X|Xs]},Settings) ->
@@ -77,7 +77,7 @@ worker({Handler,[X|Xs]},Settings) ->
             %timer:sleep(500),
             ok = ssh_connection:send(Settings#settings.ssh_conn,Handler,
 				Settings#settings.command++integer_to_list(X)++"\n",10000),
-            {Status,Data} = ssh_loop(Settings#settings.ssh_conn,Handler,[]),
+            {Status,Data} = ssh_loop(Settings#settings.ssh_conn,Handler,[],Settings),
             case re:run(Data,Settings#settings.error_mp,[{capture,none}]) of
                 match ->
                     worker({Handler,Xs},Settings);
@@ -93,12 +93,12 @@ check([X|Xs]) ->
         false -> Xs;
         true -> Xs ++ [X]
     end.
-ssh_loop(SSH,Chn,Data) ->
+ssh_loop(SSH,Chn,Data,Settings) ->
     receive
         {ssh_cm,SSH,{data,Chn,_,NewData}} ->
             ssh_connection:adjust_window(SSH,Chn,size(NewData)),
             DataAcc = Data ++ binary_to_list(NewData),
-            ssh_loop(SSH,Chn,DataAcc);
+            ssh_loop(SSH,Chn,DataAcc,Settings);
         %{ssh_cm,SSH,{eof,Chn}} ->
             %{ok,Data};
         stop ->
@@ -106,6 +106,6 @@ ssh_loop(SSH,Chn,Data) ->
         State ->
             %io:format("State: ~w~n", [State]),
             {fail,[]}
-        after 700 ->
+        after Settings#settings.timeout ->
             {ok,Data}
     end.
