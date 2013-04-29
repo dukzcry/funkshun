@@ -26,10 +26,10 @@ main([ConToAddr,Port,User,Pass,Threads,NewConnAt]) ->
     {ok,Handle} = ssh:connect(ConToAddr,N,Ssh),
     Settings = PreSettings#settings{error_mp=Mp,ssh_conn=Handle},
     io:format("~w~w~n", [date(),time()]),
-    Partionize = fun(C,L) -> Fun = fun
-                (_,_,[]) ->
+    Partionize = fun(F) -> fun
+                ([_,[]]) ->
                     [];
-                (F,Conn,[X|Xs]) ->
+                ([Conn,[X|Xs]]) ->
                     Expr = (A + (X + 1)) rem A =:= 0,
                     if Expr ->
                         %io:format("New connection~n"),
@@ -39,11 +39,10 @@ main([ConToAddr,Port,User,Pass,Threads,NewConnAt]) ->
                         NewConn = Conn
                     end,
                     Pid = part(X,Size,0,Settings#settings{ssh_conn=NewConn}),
-                    [Pid | F(F,NewConn,Xs)]
-        end,
-        Fun(Fun,C,L)
+                    [Pid | F([NewConn,Xs])]
+        end
     end,
-    Pids = Partionize(Handle,lists:seq(0,NWOLast)),
+    Pids = (y(Partionize))([Handle,lists:seq(0,NWOLast)]),
     Last = part(NZeroIncl,Size,Delta,Settings),
     loop([Last|Pids],Settings),
     io:format("~w~w~n", [date(),time()]);
@@ -51,6 +50,9 @@ main(_) ->
     io:format("~s Host Port Login Pass 20 10\n", [escript:script_name()]),
     halt(1).
 
+y(M) ->
+    G = fun(F) -> M(fun(A) -> (F(F))(A) end) end,
+    G(G).
 loop([X|Xs],Settings) ->
     receive
         {_,Pid,normal} ->
