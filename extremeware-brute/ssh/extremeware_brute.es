@@ -3,13 +3,13 @@
 -mode(native).
 
 -record(settings,{limit=9999999,command="enable license fullL3 ",error="ERROR",
-	recv_timeout=700,ssh=[{silently_accept_hosts,true},{connect_timeout,10000},{compression,none}],
+	recv_timeout=1000,ssh=[{silently_accept_hosts,true},{connect_timeout,10000},{compression,none}],
 
     error_mp=undefined,ssh_conn=undefined}).
 
-main([ConToAddr,Port,User,Pass,Threads]) ->
+main([ConToAddr,Port,User,Pass,Threads,NewConnAt]) ->
     process_flag(trap_exit, true), crypto:start(), ssh:start(),
-    N = list_to_integer(Port), T = list_to_integer(Threads),
+    N = list_to_integer(Port), T = list_to_integer(Threads), A = list_to_integer(NewConnAt),
     PreSettings = #settings{},
     {ok,Mp} = re:compile(PreSettings#settings.error),
     Limit = PreSettings#settings.limit,
@@ -19,18 +19,36 @@ main([ConToAddr,Port,User,Pass,Threads]) ->
     %			Clp <- lists:seq(0,NWOLast),
     %			part(Clp,Size,0,Settings) > NWOLast ],
     %io:format("Generated fragments~n"),
-    {ok,Handle} = ssh:connect(ConToAddr,N,[{user,User}
+    Ssh = [{user,User}
         % Interactive asking fails
         ,{password,Pass}
-        |PreSettings#settings.ssh]),
+        |PreSettings#settings.ssh],
+    {ok,Handle} = ssh:connect(ConToAddr,N,Ssh),
     Settings = PreSettings#settings{error_mp=Mp,ssh_conn=Handle},
     io:format("~w~w~n", [date(),time()]),
-    Pids = lists:map(fun(X) -> part(X,Size,0,Settings) end,lists:seq(0,NWOLast)),
+    Partionize = fun(C,L) -> Fun = fun
+                (_,_,[]) ->
+                    [];
+                (F,Conn,[X|Xs]) ->
+                    Expr = (A + (X + 1)) rem A =:= 0,
+                    if Expr ->
+                        %io:format("New connection~n"),
+                        {ok,NewHandle} = ssh:connect(ConToAddr,N,Ssh),
+                        NewConn = NewHandle;
+                    true ->
+                        NewConn = Conn
+                    end,
+                    Pid = part(X,Size,0,Settings#settings{ssh_conn=NewConn}),
+                    [Pid | F(F,NewConn,Xs)]
+        end,
+        Fun(Fun,C,L)
+    end,
+    Pids = Partionize(Handle,lists:seq(0,NWOLast)),
     Last = part(NZeroIncl,Size,Delta,Settings),
     loop([Last|Pids],Settings),
     io:format("~w~w~n", [date(),time()]);
 main(_) ->
-    io:format("~s Host Port Login Pass 10\n", [escript:script_name()]),
+    io:format("~s Host Port Login Pass 20 10\n", [escript:script_name()]),
     halt(1).
 
 loop([X|Xs],Settings) ->
@@ -47,8 +65,8 @@ loop([X|Xs],Settings) ->
         after 0 ->
             loop(check([X|Xs]),Settings)
     end;
-loop([],Settings) ->
-	ssh:close(Settings#settings.ssh_conn), true.
+loop([],_) ->
+	true.
 
 part(N,S,D,Settings) ->
     M = N * S,
@@ -86,8 +104,9 @@ worker({Handler,[X|Xs]},Settings) ->
                     ssh_connection:close(Settings#settings.ssh_conn,Handler), Data = Status
             end
     end;
-worker({Handler,[]},Settings) ->
-    ssh_connection:close(Settings#settings.ssh_conn,Handler), true.
+worker({_,[]},Settings) ->
+    %ssh_connection:close(Settings#settings.ssh_conn,Handler)
+    ssh:close(Settings#settings.ssh_conn), true.
 check([X|Xs]) ->
     case is_process_alive(X) of
         false -> Xs;
@@ -103,9 +122,10 @@ ssh_loop(SSH,Chn,Data,Settings) ->
             %{ok,Data};
         stop ->
             {ok,Data};
-        State ->
+        {ssh_cm,SSH,State} ->
             %io:format("State: ~w~n", [State]),
             {fail,[]}
-        after Settings#settings.timeout ->
+        % Sensitive
+        after Settings#settings.recv_timeout ->
             {ok,Data}
     end.
