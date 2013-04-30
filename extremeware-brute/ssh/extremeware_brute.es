@@ -2,8 +2,8 @@
 %%! -smp enable
 -mode(native).
 
--record(settings,{limit=9999999,command="enable license fullL3 ",error="ERROR",
-	recv_timeout=1000,ssh=[{silently_accept_hosts,true},{connect_timeout,10000},{compression,none}],
+-record(settings,{limit=9999999,command="enable license fullL3 ",error="ERROR",prompt="#",
+	recv_timeout=10000,ssh=[{silently_accept_hosts,true},{connect_timeout,10000},{compression,none}],
 
     error_mp=undefined,ssh_conn=undefined}).
 
@@ -30,6 +30,7 @@ main([ConToAddr,Port,User,Pass,Threads,NewConnAt]) ->
                 ([_,[]]) ->
                     [];
                 ([Conn,[X|Xs]]) ->
+                    % Reserve one for Last
                     Expr = (A + (X + 1)) rem A =:= 0,
                     if Expr ->
                         %io:format("New connection~n"),
@@ -85,7 +86,8 @@ worker({L},Settings) ->
             {ok,Handler} = ssh_connection:session_channel(Settings#settings.ssh_conn,infinity),
             success = ssh_connection:open_pty(Settings#settings.ssh_conn,Handler,"dumb",1,1,[],infinity),
             ok = ssh_connection:shell(Settings#settings.ssh_conn,Handler),
-            {ok,_Prompt} = ssh_loop(Settings#settings.ssh_conn,Handler,[],Settings),
+            {ok,_Prompt} = ssh_loop(Settings#settings.ssh_conn,Handler,[],Settings,
+                Settings#settings.prompt),
             worker({Handler,L},Settings)
     end;
 worker({Handler,[X|Xs]},Settings) ->
@@ -97,37 +99,41 @@ worker({Handler,[X|Xs]},Settings) ->
             %timer:sleep(500),
             ok = ssh_connection:send(Settings#settings.ssh_conn,Handler,
 				Settings#settings.command++integer_to_list(X)++"\n",10000),
-            {Status,Data} = ssh_loop(Settings#settings.ssh_conn,Handler,[],Settings),
-            case re:run(Data,Settings#settings.error_mp,[{capture,none}]) of
-                match ->
+            {Status,Data} = ssh_loop(Settings#settings.ssh_conn,Handler,[],Settings,
+                Settings#settings.error_mp),
+            if Status == ok ->
                     worker({Handler,Xs},Settings);
-                _ ->
+                true ->
                     if Data /= [] -> io:format("Done! ~s~n",[Data]); true -> true end,
                     ssh_connection:close(Settings#settings.ssh_conn,Handler), Data = Status
             end
     end;
 worker({_,[]},Settings) ->
-    %ssh_connection:close(Settings#settings.ssh_conn,Handler)
+    % workers -> closing all connections
     ssh:close(Settings#settings.ssh_conn), true.
 check([X|Xs]) ->
     case is_process_alive(X) of
         false -> Xs;
         true -> Xs ++ [X]
     end.
-ssh_loop(SSH,Chn,Data,Settings) ->
+ssh_loop(SSH,Chn,Data,Settings,RegEx) ->
     receive
         {ssh_cm,SSH,{data,Chn,_,NewData}} ->
             ssh_connection:adjust_window(SSH,Chn,size(NewData)),
             DataAcc = Data ++ binary_to_list(NewData),
-            ssh_loop(SSH,Chn,DataAcc,Settings);
+            case re:run(DataAcc,RegEx,[{capture,none}]) of
+                match ->
+                    {ok,DataAcc};
+                _ ->
+                    ssh_loop(SSH,Chn,DataAcc,Settings,RegEx)
+            end;
         %{ssh_cm,SSH,{eof,Chn}} ->
             %{ok,Data};
         stop ->
-            {ok,Data};
-        {ssh_cm,SSH,State} ->
+            {stop,[]};
+        State ->
             %io:format("State: ~w~n", [State]),
             {fail,[]}
-        % Sensitive
         after Settings#settings.recv_timeout ->
-            {ok,Data}
+            {timeout,Data}
     end.
