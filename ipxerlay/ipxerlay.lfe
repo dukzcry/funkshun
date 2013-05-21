@@ -1,5 +1,12 @@
 (defmodule ipxerlay
-  (export (main 0)))
+  (behavior 'gen_server)
+  
+  (export
+   (init 1)
+   (handle_info 2)
+   (terminate 2))
+  (export 
+   (start_link 1))) 
 
 (defrecord ipx-socket
   (network 0)
@@ -50,7 +57,30 @@
 	  (s (size 2) (unit 8)))
 	 bin))
     (make-ipx-header checksum c len l routed? r? type t dst-addr
-		     (unpack dp) dst-sock d src-addr (unpack sp) src-sock s)))
-)
+		     (unpack dp) dst-sock d src-addr (unpack sp) src-sock s))))
+;(defun main () (: io format '"~p~n" (list (unpack (pack (make-ipx-header))))))
+;(defun do-tests ()
+;  (andalso (=:= (byte_size (pack (make-ipx-socket))) 10)
+;	   (=:= (byte_size (pack (make-ipx-header))) 30)))
 
-(defun main () (: io format '"~p~n" (list (unpack (pack (make-ipx-header))))))
+(defun init
+  ((args) (when (is_atom (car args)) (is_atom (car (cdr args))))
+    (let* (((list ip-atom port-atom) args)
+	   ((tuple 'ok ip) (: inet_parse address (atom_to_list ip-atom)))
+	   ((tuple 'ok socket) (: gen_udp open (list_to_integer (atom_to_list port-atom))
+				  (list 'binary (tuple 'ip ip) #(active true)))))
+      (tuple 'ok #(socket ())))))
+(defun terminate (_reason state)
+  (let (((tuple fd _calls-list) state))
+    (: gen_udp close fd)))
+
+(defun handle_info (info state)
+  (let* (((tuple 'udp fd ip port msg) info)
+	 ((tuple 'socket ()) state))
+    ;(: io format '"~p~n" (list (list (tuple 'fd fd)(tuple 'ip ip)(tuple 'port port))))
+    (tuple 'noreply state)))
+(defun start_link (args)
+  ;(if (do-tests)
+    (: gen_server start_link #(local ipxerlay) 'ipxerlay args ())
+    ;#(error tests-failed))
+)
