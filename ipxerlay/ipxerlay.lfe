@@ -6,7 +6,8 @@
    (handle_info 2)
    (terminate 2))
   (export 
-   (start_link 1))) 
+   (start_link 1)
+   (test_call 0))) 
 
 (defrecord ipx-socket
   (network 0)
@@ -58,7 +59,16 @@
 	 bin))
     (make-ipx-header checksum c len l routed? r? type t dst-addr
 		     (unpack dp) dst-sock d src-addr (unpack sp) src-sock s))))
-;(defun main () (: io format '"~p~n" (list (unpack (pack (make-ipx-header))))))
+(defun test_call ()
+  (let ((socket (make-ipx-socket
+		 addr #xffffffff
+		 port #xffff)))
+    (: io format '"~p~n" (list (unpack (pack
+	     (make-ipx-header
+	      checksum #xffff
+	      len 30
+	      dst-addr socket
+	      src-addr socket)))))))
 ;(defun do-tests ()
 ;  (andalso (=:= (byte_size (pack (make-ipx-socket))) 10)
 ;	   (=:= (byte_size (pack (make-ipx-header))) 30)))
@@ -75,8 +85,7 @@
     (: gen_udp close fd)))
 
 (defun handle_info (info state)
-  (let* (((tuple 'udp fd ip port msg) info)
-	 ((tuple 'socket ()) state))
+  (let (((tuple 'udp fd ip port msg) info))
     ;(: io format '"~p~n" (list (list (tuple 'fd fd)(tuple 'ip ip)(tuple 'port port))))
     (tuple 'noreply state)))
 (defun start_link (args)
