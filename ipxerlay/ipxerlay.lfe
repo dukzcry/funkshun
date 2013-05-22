@@ -41,13 +41,13 @@
     ((pack (ipx-header-src-addr struct)) binary)
     ((ipx-header-src-sock struct) (size 2) (unit 8)))))
 (defun unpack
-  ((bin) (when (=:= (byte_size bin) 10)) (let (((binary
+  ((bin) (when (== (byte_size bin) 10)) (let (((binary
 	  (n (size 4) (unit 8))
 	  (a (size 4) (unit 8))
 	  (p (size 2) (unit 8)))
 	 bin))
     (make-ipx-socket network n addr a port p)))
-  ((bin) (when (=:= (byte_size bin) 30)) (let (((binary
+  ((bin) (when (== (byte_size bin) 30)) (let (((binary
 	  (c (size 2) (unit 8))
 	  (l (size 2) (unit 8))
 	  (r? (size 8))
@@ -70,8 +70,15 @@
 	      dst-addr socket
 	      src-addr socket)))))))
 ;(defun do-tests ()
-;  (andalso (=:= (byte_size (pack (make-ipx-socket))) 10)
-;	   (=:= (byte_size (pack (make-ipx-header))) 30)))
+;  (andalso (== (byte_size (pack (make-ipx-socket))) 10)
+;	   (== (byte_size (pack (make-ipx-header))) 30)))
+(defun check-packet (header size)
+  (let ((len (ipx-header-len header)))
+  (andalso (== (ipx-header-checksum header) #xffff)
+	   (>= len 30) (=< len size)
+	   (== (bor (ipx-socket-network (ipx-header-src-addr header))
+		    (ipx-socket-network (ipx-header-dst-addr header)))
+	       (ipx-header-routed? header) 0))))
 
 (defun init
   ((args) (when (is_atom (car args)) (is_atom (car (cdr args))))
