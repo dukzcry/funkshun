@@ -81,7 +81,7 @@
 	       (ipx-header-routed? header) 0))))
 
 (defun init
-  ((args) (when (is_atom (car args)) (is_atom (car (cdr args))))
+  ((args) (when (is_atom (car args)) (is_atom (cadr args)))
     (let* (((list ip-atom port-atom) args)
 	   ((tuple 'ok ip) (: inet_parse address (atom_to_list ip-atom)))
 	   ((tuple 'ok socket) (: gen_udp open (list_to_integer (atom_to_list port-atom))
@@ -94,6 +94,8 @@
 (defun handle_info (info state)
   (let (((tuple 'udp fd ip port msg) info))
     ;(: io format '"~p~n" (list (list (tuple 'fd fd)(tuple 'ip ip)(tuple 'port port))))
+    (let (((binary (header binary (size 30)) (rest bytes)) msg))
+      (check-packet (unpack header) (byte_size msg)))
     (tuple 'noreply state)))
 (defun start_link (args)
   ;(if (do-tests)
