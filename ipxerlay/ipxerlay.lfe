@@ -10,7 +10,7 @@
    (test_call 0)))
 
 (defrecord settings
-  (udp-options (list 'binary #(active false) #(recbuf 65536))))
+  (udp-options (list 'binary #(active false) #(recbuf 65536) #(reuseaddr true))))
 
 (defrecord ipx-socket
   (network 0)
@@ -89,7 +89,6 @@
 	   (== (ipx-socket-port socket) #xffff)))
 
 (defun process_msg (msg)
-  ;(: io format '"Processing message ~p~n" (list msg))
   (let (((binary (header binary (size 30)) (_rest bytes)) msg))
     (let ((struct (unpack header)))
       (andalso (check-packet struct (byte_size msg))
@@ -115,22 +114,22 @@
 ;  (let (((tuple fd _calls-list) state))
 ;    (: gen_udp close fd)))
 
-(defun handle_info (fd ignore)
+(defun handle_info (fd clients ignore)
   ;(let (((tuple 'udp fd ip port msg) info))
   (: inet setopts fd (list #(active once)))
   (receive ((tuple 'udp fd ip port msg)
-	    ;(: io format '"~p~n" (list (list (tuple 'fd fd)(tuple 'ip ip)(tuple 'port port)
-					     ;(tuple 'ignore ignore))))
-	    (if (: lists any (lambda (x) (== (element 2 x) (cons ip port))) ignore)
-	      (let (((cons _head tail) ignore))
-		; receive but don't process
-		(handle_info fd tail))
+	    ;(: io format '"~p~n" (list (list (tuple 'fd fd)(tuple 'ip ip)(tuple 'port port))))
+	    (if (: lists any (lambda (x) (== x (cons ip port))) ignore)
+		;(: io format '"Ignored: ~p~n" (list (tuple 'ignore ignore)))
+		(handle_info fd clients ignore))
 	      (let ((pid (spawn_link (lambda () (process_msg msg)))))
-		(handle_info fd (cons (tuple pid (cons ip port)) ignore)))))
+		;(: io format '"Processing message ~p~n" (list msg))
+		(handle_info fd (cons (tuple pid (cons ip port)) clients) ignore)))
 	   ((tuple _ pid 'normal)
-	    (handle_info fd (: lists filter (lambda (x) (/= (element 1 x) pid)) ignore)))
+	    (handle_info fd (: lists filter (lambda (x) (/= (element 1 x) pid)) clients) ignore))
 	   ((tuple _ pid _)
-	    (handle_info fd ignore)))
+	    (let ((elm (: lists keyfind pid 1 clients)))
+	      (handle_info fd (: lists delete elm clients) (cons (element 2 elm) ignore)))))
     ;(tuple 'noreply state))
 )
 (defun start_link (args)
@@ -140,6 +139,6 @@
       (let (((tuple 'ok port) (: inet port socket)))
 	(: io format '"Using port ~B~n" (list port))
 	(process_flag 'trap_exit 'true)
-	(handle_info socket ())))
+	(handle_info socket () ())))
     ;#(error tests-failed))
 )
