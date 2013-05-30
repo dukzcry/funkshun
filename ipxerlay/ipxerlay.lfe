@@ -7,26 +7,26 @@
    ;(terminate 2))
   (export
    (start_link 1)
-   (test_call 0)))
+   (test_call 0)
+
+   (process_msg 2)))
 
 (defrecord settings
-  (udp-options (list 'binary #(active false) #(recbuf 65536) #(reuseaddr true)))
-  ; 20 sec
-  (banlist-life 20000000))
+  (udp-options (list 'binary #(active false) #(recbuf 65536) #(reuseaddr true))))
 
 (defrecord ipx-socket
   (network 0)
-  (addr 0)
-  (port 0))
+  addr
+  port)
 (defrecord ipx-header
-  (checksum 0)
-  (len 0)
+  (checksum #xffff)
+  (len 30)
   (routed? 0)
   (type 0)
-  (dst-addr (make-ipx-socket))
-  (dst-sock 0)
-  (src-addr (make-ipx-socket))
-  (src-sock 0))
+  dst-addr
+  dst-sock
+  src-addr
+  src-sock)
 
 (defun pack
   ((struct) (when (is-ipx-socket struct))
@@ -70,10 +70,10 @@
 		 port #xffff)))
     (: io format '"~p~n" (list (unpack (pack
 	     (make-ipx-header
-	      checksum #xffff
-	      len 30
 	      dst-addr socket
-	      src-addr socket)))))))
+	      dst-sock 0
+	      src-addr socket
+	      src-sock 0)))))))
 ;(defun do-tests ()
 ;  (andalso (== (byte_size (pack (make-ipx-socket))) 10)
 ;	   (== (byte_size (pack (make-ipx-header))) 30)))
@@ -90,67 +90,83 @@
   (andalso (== (ipx-socket-addr socket) #xffffffff)
 	   (== (ipx-socket-port socket) #xffff)))
 
-(defun process_msg (msg)
-  (let (((binary (header binary (size 30)) (_rest bytes)) msg))
-    (let ((struct (unpack header)))
-      (andalso (check-packet struct (byte_size msg))
-	       (nil-socket? (ipx-socket-network (ipx-header-dst-addr struct)))
-	       (nil-socket? (ipx-socket-network (ipx-header-src-addr struct)))))))
+(defmacro make-client (ip port arg)
+  `(tuple (cons ,ip ,port) ,arg))
 
+(defun process_msg (parent arg)
+  (let* (((tuple (cons ip p) msg) arg)
+	((binary (header binary (size 30)) (_rest bytes)) msg)
+	(struct (unpack header)))
+    (if (check-packet struct (byte_size msg))
+
+      (
+      (if (andalso (nil-socket? (ipx-socket-network (ipx-header-dst-addr struct)))
+		   (nil-socket? (ipx-socket-network (ipx-header-src-addr struct))))
+	 (let ((socket (make-ipx-socket
+			addr ip
+			port p)))
+	   (! parent (tuple 'ack (list ip p) (pack (make-ipx-header
+						    dst-addr socket
+						    dst-sock (ipx-socket-network (ipx-header-src-addr struct))
+						    src-addr socket
+						    src-sock (ipx-socket-network (ipx-header-src-addr struct))))))))
+       (if (broadcast-socket? (ipx-socket-network (ipx-header-dst-addr struct)))
+	 (! parent (tuple 'bcst (list ip p) msg))
+	 (! parent (tuple 'single (list ip p) msg)))
+      )
+
+      (let (('fail 'wrong-packet))
+      ))))
 (defun init
   ((args) (when (is_atom (car args)) (is_atom (cadr args)))
    (let ((port (list_to_integer (atom_to_list (car args)))))
-     (let ((options (make-settings)))
+     (let ((options (settings-udp-options (make-settings))))
      (case args
        ((list _port-atom type-atom ip-atom) (when (is_atom ip-atom))
 	(let* (((tuple 'ok ip) (: inet_parse address (atom_to_list ip-atom)))
 	       ((tuple 'ok socket) (: gen_udp open port
 				      (++ (list type-atom (tuple 'ip ip))
-					  (settings-udp-options options)))))
-	  (tuple 'ok (tuple socket options))))
+					  options))))
+	  (tuple 'ok (tuple socket ()))))
        ((list _port-atom fd-atom)
 	(let (((tuple 'ok socket) (: gen_udp open port
 				  (cons (tuple 'fd (list_to_integer (atom_to_list fd-atom)))
-					(settings-udp-options options)))))
-	  (tuple 'ok (tuple socket options)))))))))
+					options))))
+	  (tuple 'ok (tuple socket ())))))))))
 ;(defun terminate (_reason state)
 ;  (let (((tuple fd _calls-list) state))
 ;    (: gen_udp close fd)))
 
-(defun handle_info (fd blife lists)
+(defun handle_info (fd lists)
   ;(let (((tuple 'udp fd ip port msg) info))
-  (let (((tuple clients ignore cleanup) lists))
+  (let (((tuple procs ignore clients) lists))
   (: inet setopts fd (list #(active once)))
   (receive ((tuple 'udp fd ip port msg)
 	    ;(: io format '"~p~n" (list (list (tuple 'fd fd)(tuple 'ip ip)(tuple 'port port))))
-	    (if (andalso (== (car cleanup) 'true)
-		 (> (: timer now_diff (now) (cdr cleanup)) blife))
-		 (handle_info fd blife (tuple clients () (cons 'false 0)))
-		 ; ignore bogus clients
-		 (if (: lists any (lambda (x) (== x (cons ip port))) ignore)
-		   ;(: io format '"Ignored: ~p~n" (list ignore))
-		   (handle_info fd blife lists)
-		   (let ((pid (spawn_link (lambda () (process_msg msg)))))
-		     ;(: io format '"Processing message ~p~n" (list msg))
-		     (handle_info fd blife (setelement 1 lists (cons (tuple pid (cons ip port)) clients)))))))
+	    ; don't process bogus clients
+	    (if (: lists any (lambda (x) (== x (cons ip port))) ignore)
+	      ;(: io format '"Ignored: ~p~n" (list ignore))
+	      (handle_info fd lists)
+	      (let ((pid (spawn_link 'ipxerlay 'process_msg (list (self) (make-client ip port msg)))))
+		;(: io format '"Processing message ~p~n" (list msg))
+		(handle_info fd (setelement 1 lists (cons (make-client ip port pid) procs))))))
 	   ((tuple _ pid 'normal)
-	    (handle_info fd blife (setelement 1 lists (: lists filter (lambda (x) (/= (element 1 x) pid)) clients))))
-	   ((tuple _ pid _status)
-	    (let* ((elm (: lists keyfind pid 1 clients))
-		   (newclients (: lists delete elm clients))
-		   (newignore (cons (element 2 elm) ignore)))
-	      (if (== (car cleanup) 'false)
-		(handle_info fd blife (tuple newclients newignore (cons 'true (now))))
-		(handle_info fd blife (tuple newclients newignore cleanup)))))))
+	    (handle_info fd (setelement 1 lists (: lists filter (lambda (x) (/= (element 2 x) pid)) procs))))
+	   ((tuple 'ack (cons ip port) msg)
+	    (: gen_udp send fd ip port msg)
+	    (handle_info fd (setelement 3 lists (cons (make-client ip port ()) (element 3 lists)))))
+	   ((tuple _ pid _)
+	    (let ((elm (: lists keyfind pid 2 procs)))
+		(handle_info fd (tuple (: lists delete elm procs) (cons (element 1 elm) ignore) clients))))))
     ;(tuple 'noreply state))
 )
 (defun start_link (args)
   ;(if (do-tests)
     ;(: gen_server start_link #(local ipxerlay) 'ipxerlay args ())
-    (let (((tuple 'ok (tuple socket options)) (init args)))
+    (let (((tuple 'ok (tuple socket ())) (init args)))
       (let (((tuple 'ok port) (: inet port socket)))
 	(: io format '"Using port ~B~n" (list port))
 	(process_flag 'trap_exit 'true)
-	(handle_info socket (settings-banlist-life options) (tuple () () (cons 'false 0)))))
+	(handle_info socket (tuple () () ()))))
     ;#(error tests-failed))
 )
