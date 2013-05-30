@@ -97,26 +97,21 @@
   (let* (((tuple (cons ip p) msg) arg)
 	((binary (header binary (size 30)) (_rest bytes)) msg)
 	(struct (unpack header)))
-    (if (check-packet struct (byte_size msg))
-
-      (
-      (if (andalso (nil-socket? (ipx-socket-network (ipx-header-dst-addr struct)))
-		   (nil-socket? (ipx-socket-network (ipx-header-src-addr struct))))
-	 (let ((socket (make-ipx-socket
-			addr ip
-			port p)))
-	   (! parent (tuple 'ack (list ip p) (pack (make-ipx-header
-						    dst-addr socket
-						    dst-sock (ipx-socket-network (ipx-header-src-addr struct))
-						    src-addr socket
-						    src-sock (ipx-socket-network (ipx-header-src-addr struct))))))))
-       (if (broadcast-socket? (ipx-socket-network (ipx-header-dst-addr struct)))
-	 (! parent (tuple 'bcst (list ip p) msg))
-	 (! parent (tuple 'single (list ip p) msg)))
-      )
-
-      (let (('fail 'wrong-packet))
-      ))))
+    (if (not (check-packet struct (byte_size msg)))
+      (let (('fail 'wrong-packet))))
+    (if (andalso (nil-socket? (ipx-socket-network (ipx-header-dst-addr struct)))
+		 (nil-socket? (ipx-socket-network (ipx-header-src-addr struct))))
+      (let ((socket (make-ipx-socket
+		     addr ip
+		     port p)))
+	(! parent (tuple 'ack (list ip p) (pack (make-ipx-header
+						 dst-addr socket
+						 dst-sock (ipx-socket-network (ipx-header-src-addr struct))
+						 src-addr socket
+						 src-sock (ipx-socket-network (ipx-header-src-addr struct))))))))
+    (if (broadcast-socket? (ipx-socket-network (ipx-header-dst-addr struct)))
+      (! parent (tuple 'bcst (list ip p) msg))
+      (! parent (tuple 'single (list ip p) msg)))))
 (defun init
   ((args) (when (is_atom (car args)) (is_atom (cadr args)))
    (let ((port (list_to_integer (atom_to_list (car args)))))
