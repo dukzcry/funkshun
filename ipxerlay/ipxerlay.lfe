@@ -14,14 +14,6 @@
 (defrecord settings
   (udp-options (list 'binary #(active false) #(recbuf 65536) #(reuseaddr true))))
 
-; to-do: ipv6
-(defun ip-to-int
-  ((ip) (when (== (tuple_size ip) 4))
-   (let (((tuple a b c d) ip))
-     (+ (* a 16777216) (* b 65536) (* c 256) d))))
-(defmacro int-to-ipv4 (ip)
-  `(tuple (bsr ,ip 24) (bsr (band ,ip 16711680) 16) (bsr (band ,ip 65280) 8) (band ,ip 255)))
-
 (defrecord ipx-socket
   (network 0)
   addr
@@ -98,6 +90,15 @@
   (andalso (== (ipx-socket-addr socket) #xffffffff)
 	   (== (ipx-socket-port socket) #xffff)))
 
+; to-do: ipv6
+(defun ip-to-int
+  ((ip) (when (== (tuple_size ip) 4))
+   (let (((tuple a b c d) ip))
+     (+ (* a 16777216) (* b 65536) (* c 256) d))))
+(defmacro int-to-ipv4 (ip)
+  ;`(tuple (band ,ip 255) (bsr (band ,ip 65280) 8) (bsr (band ,ip 16711680) 16) (bsr ,ip 24))
+  `(tuple (bsr ,ip 24) (bsr (band ,ip 16711680) 16) (bsr (band ,ip 65280) 8) (band ,ip 255))
+)
 (defmacro make-client (ip port arg)
   `(tuple (cons ,ip ,port) ,arg))
 
@@ -111,6 +112,7 @@
     (let* ((dst (ipx-header-dst-addr struct))
 	   (src (ipx-header-src-addr struct)))
       (if (andalso (nil-socket? dst) (nil-socket? src))
+
 		   (let* ((socket (make-ipx-socket
 				  addr (ip-to-int ip)
 				  port p))
@@ -119,12 +121,12 @@
 							      dst-addr socket
 							      dst-sock sock
 							      src-addr socket
-							      src-sock sock))))))
-      (if (broadcast-socket? dst)
-	; pass who we are
-	(! parent (tuple 'bcst (cons ip p) msg))
-	(! parent (tuple 'single (cons (int-to-ipv4 (ipx-socket-addr dst))
-				       (int-to-ipv4 (ipx-socket-port dst))) msg))))))
+							      src-sock sock)))))
+		   (if (broadcast-socket? dst)
+		     ; pass who we are
+		     (! parent (tuple 'bcst (cons ip p) msg))
+		     (! parent (tuple 'single (cons (int-to-ipv4 (ipx-socket-addr dst))
+						    (ipx-socket-port dst)) msg)))))))
 (defun init
   ((args) (when (is_atom (car args)) (is_atom (cadr args)))
    (let ((port (list_to_integer (atom_to_list (car args)))))
@@ -150,15 +152,15 @@
   (let (((tuple procs ignore clients) lists))
   (: inet setopts fd (list #(active once)))
   (receive ((tuple 'udp fd ip port msg)
-	    ;(: io format '"~p~n" (list (list (tuple 'fd fd)(tuple 'ip ip)(tuple 'port port))))
 	    ; don't process bogus clients
 	    (let ((sin (cons ip port)))
-	      (if (: lists any (lambda (x) (== x sin)) ignore)
-		     ;(: io format '"Ignored: ~p~n" (list ignore))
-		     (handle_info fd lists)
-		     (let ((pid (spawn_link 'ipxerlay 'process_msg (list (self) (make-client ip port msg)))))
-		       ;(: io format '"Processing message ~p~n" (list msg))
-		       (handle_info fd (setelement 1 lists (cons (make-client ip port pid) procs)))))))
+	      (case (: lists any (lambda (x) (== x sin)) ignore)
+		('true
+		 (: io format '"Ignored: ~p, ignore: ~p~n" (list sin ignore))
+		 (handle_info fd lists))
+		('false
+		 (let ((pid (spawn_link 'ipxerlay 'process_msg (list (self) (make-client ip port msg)))))
+		       (handle_info fd (setelement 1 lists (cons (make-client ip port pid) procs))))))))
 	   ((tuple _ pid 'normal)
 	    (handle_info fd (setelement 1 lists (: lists filter (lambda (x) (/= (element 2 x) pid)) procs))))
 	   ;; lot of synchronous pokery
@@ -167,15 +169,19 @@
 	      (case type
 		('single
 		 (let ((target (: lists keyfind sin 1 clients)))
-		   (if target
-		     (: gen_udp send fd (car target) (cdr target) msg)))
+		   (: io format '"Trying to send to: ~p, clients: ~p~n" (list sin clients))
+		   (if (/= target 'false)
+		     (let ((elm (element 1 target)))
+		       (: gen_udp send fd (car elm) (cdr elm) msg))))
 		 (handle_info fd lists))
 		('bcst
 		 (: lists foreach (lambda (x) (let ((elm (element 1 x)))
+						(: io format '"Sending to ~p from broadcast~n" (list elm))
 						(: gen_udp send fd (car elm) (cdr elm) msg)))
 		    (: lists filter (lambda (x) (/= (element 1 x) sin)) clients))
 		 (handle_info fd lists))
 		('ack
+		 (: io format '"New client: ~p, clients: ~p~n" (list sin clients))
 		 (: gen_udp send fd ip port msg)
 		 (handle_info fd (setelement 3 lists (cons (make-client ip port ()) clients)))))))
 	   ;;
