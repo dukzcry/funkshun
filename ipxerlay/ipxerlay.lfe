@@ -14,6 +14,14 @@
 (defrecord settings
   (udp-options (list 'binary #(active false) #(recbuf 65536) #(reuseaddr true))))
 
+; to-do: ipv6
+(defun ip-to-int
+  ((ip) (when (== (tuple_size ip) 4))
+   (let (((tuple a b c d) ip))
+     (+ (* a 16777216) (* b 65536) (* c 256) d))))
+(defmacro int-to-ipv4 (ip)
+  `(tuple (bsr ,ip 24) (bsr (band ,ip 16711680) 16) (bsr (band ,ip 65280) 8) (band ,ip 255)))
+
 (defrecord ipx-socket
   (network 0)
   addr
@@ -95,23 +103,28 @@
 
 (defun process_msg (parent arg)
   (let* (((tuple (cons ip p) msg) arg)
+	 ; better than using header sock opt
 	((binary (header binary (size 30)) (_rest bytes)) msg)
 	(struct (unpack header)))
     (if (not (check-packet struct (byte_size msg)))
       (let (('fail 'wrong-packet))))
-    (if (andalso (nil-socket? (ipx-socket-network (ipx-header-dst-addr struct)))
-		 (nil-socket? (ipx-socket-network (ipx-header-src-addr struct))))
-      (let ((socket (make-ipx-socket
-		     addr ip
-		     port p)))
-	(! parent (tuple 'ack (list ip p) (pack (make-ipx-header
-						 dst-addr socket
-						 dst-sock (ipx-socket-network (ipx-header-src-addr struct))
-						 src-addr socket
-						 src-sock (ipx-socket-network (ipx-header-src-addr struct))))))))
-    (if (broadcast-socket? (ipx-socket-network (ipx-header-dst-addr struct)))
-      (! parent (tuple 'bcst (list ip p) msg))
-      (! parent (tuple 'single (list ip p) msg)))))
+    (let* ((dst (ipx-header-dst-addr struct))
+	   (src (ipx-header-src-addr struct)))
+      (if (andalso (nil-socket? dst) (nil-socket? src))
+		   (let* ((socket (make-ipx-socket
+				  addr (ip-to-int ip)
+				  port p))
+			  (sock (ipx-header-src-sock struct)))
+		     (! parent (tuple 'ack (cons ip p) (pack (make-ipx-header
+							      dst-addr socket
+							      dst-sock sock
+							      src-addr socket
+							      src-sock sock))))))
+      (if (broadcast-socket? dst)
+	; pass who we are
+	(! parent (tuple 'bcst (cons ip p) msg))
+	(! parent (tuple 'single (cons (int-to-ipv4 (ipx-socket-addr dst))
+				       (int-to-ipv4 (ipx-socket-port dst))) msg))))))
 (defun init
   ((args) (when (is_atom (car args)) (is_atom (cadr args)))
    (let ((port (list_to_integer (atom_to_list (car args)))))
@@ -139,18 +152,35 @@
   (receive ((tuple 'udp fd ip port msg)
 	    ;(: io format '"~p~n" (list (list (tuple 'fd fd)(tuple 'ip ip)(tuple 'port port))))
 	    ; don't process bogus clients
-	    (if (: lists any (lambda (x) (== x (cons ip port))) ignore)
-	      ;(: io format '"Ignored: ~p~n" (list ignore))
-	      (handle_info fd lists)
-	      (let ((pid (spawn_link 'ipxerlay 'process_msg (list (self) (make-client ip port msg)))))
-		;(: io format '"Processing message ~p~n" (list msg))
-		(handle_info fd (setelement 1 lists (cons (make-client ip port pid) procs))))))
+	    (let ((sin (cons ip port)))
+	      (if (: lists any (lambda (x) (== x sin)) ignore)
+		     ;(: io format '"Ignored: ~p~n" (list ignore))
+		     (handle_info fd lists)
+		     (let ((pid (spawn_link 'ipxerlay 'process_msg (list (self) (make-client ip port msg)))))
+		       ;(: io format '"Processing message ~p~n" (list msg))
+		       (handle_info fd (setelement 1 lists (cons (make-client ip port pid) procs)))))))
 	   ((tuple _ pid 'normal)
 	    (handle_info fd (setelement 1 lists (: lists filter (lambda (x) (/= (element 2 x) pid)) procs))))
-	   ((tuple 'ack (cons ip port) msg)
-	    (: gen_udp send fd ip port msg)
-	    (handle_info fd (setelement 3 lists (cons (make-client ip port ()) (element 3 lists)))))
+	   ;; lot of synchronous pokery
+	   ((tuple type (cons ip port) msg)
+	    (let ((sin (cons ip port)))
+	      (case type
+		('single
+		 (let ((target (: lists keyfind sin 1 clients)))
+		   (if target
+		     (: gen_udp send fd (car target) (cdr target) msg)))
+		 (handle_info fd lists))
+		('bcst
+		 (: lists foreach (lambda (x) (let ((elm (element 1 x)))
+						(: gen_udp send fd (car elm) (cdr elm) msg)))
+		    (: lists filter (lambda (x) (/= (element 1 x) sin)) clients))
+		 (handle_info fd lists))
+		('ack
+		 (: gen_udp send fd ip port msg)
+		 (handle_info fd (setelement 3 lists (cons (make-client ip port ()) clients)))))))
+	   ;;
 	   ((tuple _ pid _)
+	    ; it must be in the list
 	    (let ((elm (: lists keyfind pid 2 procs)))
 		(handle_info fd (tuple (: lists delete elm procs) (cons (element 1 elm) ignore) clients))))))
     ;(tuple 'noreply state))
