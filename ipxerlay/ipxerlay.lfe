@@ -98,6 +98,7 @@
 (defmacro int-to-ipv4 (ip)
   `(tuple (bsr ,ip 24) (bsr (band ,ip 16711680) 16) (bsr (band ,ip 65280) 8) (band ,ip 255))
 )
+;
 (defmacro make-client (ip port arg)
   `(tuple (cons ,ip ,port) ,arg))
 
@@ -127,7 +128,7 @@
 		     ; pass who we are
 		     (! parent (tuple 'bcst client msg))
 		     (! parent (tuple 'single (make-client (int-to-ipv4 (ipx-socket-addr dst))
-						    (ipx-socket-port dst) (make-client ip p now)) msg)))))))
+						    (ipx-socket-port dst) client) msg)))))))
 (defun init
   ((args) (when (is_atom (car args)) (is_atom (cadr args)))
    (let* ((port (list_to_integer (atom_to_list (car args))))
@@ -151,7 +152,9 @@
 (defun handle_info (fd lists)
   ;(let (((tuple 'udp fd ip port msg) info))
   (let (((tuple procs ignore clients) lists))
-  (flet ((ignored? (x) (: lists any (lambda (y) (== y x)) ignore)))
+  (flet* ((ignored? (x) (: lists any (lambda (y) (== y x)) ignore))
+	  (set-procs (x) (setelement 1 lists x))
+	  (set-clients (x) (setelement 3 lists x)))
   (: inet setopts fd (list #(active once)))
   (receive ((tuple 'udp fd ip port msg)
 	   (let ((sin (cons ip port)))
@@ -160,12 +163,12 @@
 	       ('false
 		(: io format '"Got message from ~p~n" (list sin))
 		(let ((pid (spawn_link 'ipxerlay 'process_msg (list (self) (make-client ip port msg)))))
-		  (handle_info fd (setelement 1 lists (cons (make-client ip port pid) procs)))))
+		  (handle_info fd (set-procs (cons (make-client ip port pid) procs)))))
 	       ('true
 		(: io format '"Ignored: ~p, ignore: ~p~n" (list sin ignore))
 		(handle_info fd lists)))))
 	   ((tuple _ pid 'normal)
-	    (handle_info fd (setelement 1 lists (: lists filter (lambda (x) (/= (element 2 x) pid)) procs))))
+	    (handle_info fd (set-procs (: lists filter (lambda (x) (/= (element 2 x) pid)) procs))))
 	   ;; lot of synchronous pokery
 	   ((tuple type (= (tuple (= (cons ip port) sin) arg) client) msg)
 	      (case type
@@ -175,17 +178,17 @@
 		   (if (/= target 'false)
 		     (let ((elm (element 1 target)))
 		       (: gen_udp send fd (car elm) (cdr elm) msg))))
-		 (handle_info fd (setelement 3 lists (: lists keyreplace sin 1 clients arg))))
+		 (handle_info fd (set-clients (: lists keyreplace (element 1 arg) 1 clients arg))))
 		('bcst
 		 (: lists foreach (lambda (x) (let ((elm (element 1 x)))
 						(: io format '"Sending to ~p from broadcast~n" (list elm))
 						(: gen_udp send fd (car elm) (cdr elm) msg)))
 		    (: lists filter (lambda (x) (/= (element 1 x) sin)) clients))
-		 (handle_info fd (setelement 3 lists (: lists keyreplace sin 1 clients client))))
+		 (handle_info fd (set-clients (: lists keyreplace sin 1 clients client))))
 		('ack
 		 (: io format '"New client: ~p, clients: ~p~n" (list sin clients))
 		 (: gen_udp send fd ip port msg)
-		 (handle_info fd (setelement 3 lists (cons client clients))))))
+		 (handle_info fd (set-clients (cons client clients))))))
 	   ;;
 	   ((tuple _ pid _)
 	    ; it must be in the list
@@ -193,7 +196,7 @@
 		   (newprocs (: lists delete elm procs))
 		   (sin (element 1 elm)))
 	      (if (ignored? sin)
-		(handle_info fd (setelement 1 lists newprocs))
+		(handle_info fd (set-procs newprocs))
 		(handle_info fd (tuple newprocs (cons sin ignore) clients))))))))
     ;(tuple 'noreply state))
 )
