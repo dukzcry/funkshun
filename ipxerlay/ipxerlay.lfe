@@ -96,7 +96,6 @@
    (let (((tuple a b c d) ip))
      (+ (* a 16777216) (* b 65536) (* c 256) d))))
 (defmacro int-to-ipv4 (ip)
-  ;`(tuple (band ,ip 255) (bsr (band ,ip 65280) 8) (bsr (band ,ip 16711680) 16) (bsr ,ip 24))
   `(tuple (bsr ,ip 24) (bsr (band ,ip 16711680) 16) (bsr (band ,ip 65280) 8) (band ,ip 255))
 )
 (defmacro make-client (ip port arg)
@@ -110,23 +109,25 @@
     (if (not (check-packet struct (byte_size msg)))
       (let (('fail 'wrong-packet))))
     (let* ((dst (ipx-header-dst-addr struct))
-	   (src (ipx-header-src-addr struct)))
+	   (src (ipx-header-src-addr struct))
+	   (now (now))
+	   (client (make-client ip p now)))
       (if (andalso (nil-socket? dst) (nil-socket? src))
 
 		   (let* ((socket (make-ipx-socket
 				  addr (ip-to-int ip)
 				  port p))
 			  (sock (ipx-header-src-sock struct)))
-		     (! parent (tuple 'ack sin (pack (make-ipx-header
+		     (! parent (tuple 'ack client (pack (make-ipx-header
 							      dst-addr socket
 							      dst-sock sock
 							      src-addr socket
 							      src-sock sock)))))
 		   (if (broadcast-socket? dst)
 		     ; pass who we are
-		     (! parent (tuple 'bcst sin msg))
-		     (! parent (tuple 'single (cons (int-to-ipv4 (ipx-socket-addr dst))
-						    (ipx-socket-port dst)) msg)))))))
+		     (! parent (tuple 'bcst client msg))
+		     (! parent (tuple 'single (make-client (int-to-ipv4 (ipx-socket-addr dst))
+						    (ipx-socket-port dst) (make-client ip p now)) msg)))))))
 (defun init
   ((args) (when (is_atom (car args)) (is_atom (cadr args)))
    (let* ((port (list_to_integer (atom_to_list (car args))))
@@ -166,7 +167,7 @@
 	   ((tuple _ pid 'normal)
 	    (handle_info fd (setelement 1 lists (: lists filter (lambda (x) (/= (element 2 x) pid)) procs))))
 	   ;; lot of synchronous pokery
-	   ((tuple type (= (cons ip port) sin) msg)
+	   ((tuple type (= (tuple (= (cons ip port) sin) arg) client) msg)
 	      (case type
 		('single
 		 (let ((target (: lists keyfind sin 1 clients)))
@@ -174,17 +175,17 @@
 		   (if (/= target 'false)
 		     (let ((elm (element 1 target)))
 		       (: gen_udp send fd (car elm) (cdr elm) msg))))
-		 (handle_info fd lists))
+		 (handle_info fd (setelement 3 lists (: lists keyreplace sin 1 clients arg))))
 		('bcst
 		 (: lists foreach (lambda (x) (let ((elm (element 1 x)))
 						(: io format '"Sending to ~p from broadcast~n" (list elm))
 						(: gen_udp send fd (car elm) (cdr elm) msg)))
 		    (: lists filter (lambda (x) (/= (element 1 x) sin)) clients))
-		 (handle_info fd lists))
+		 (handle_info fd (setelement 3 lists (: lists keyreplace sin 1 clients client))))
 		('ack
 		 (: io format '"New client: ~p, clients: ~p~n" (list sin clients))
 		 (: gen_udp send fd ip port msg)
-		 (handle_info fd (setelement 3 lists (cons (make-client ip port ()) clients))))))
+		 (handle_info fd (setelement 3 lists (cons client clients))))))
 	   ;;
 	   ((tuple _ pid _)
 	    ; it must be in the list
