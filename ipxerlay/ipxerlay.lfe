@@ -111,8 +111,7 @@
       (let (('fail 'wrong-packet))))
     (let* ((dst (ipx-header-dst-addr struct))
 	   (src (ipx-header-src-addr struct))
-	   (now (now))
-	   (client (make-client ip p now)))
+	   (client (make-client ip p (now))))
       (if (andalso (nil-socket? dst) (nil-socket? src))
 
 		   (let* ((socket (make-ipx-socket
