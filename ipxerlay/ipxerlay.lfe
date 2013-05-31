@@ -12,7 +12,7 @@
    (process_msg 2)))
 
 (defrecord settings
-  (udp-options (list 'binary #(active false) #(recbuf 65536) #(reuseaddr true))))
+  (udp-options (list 'binary #(active false) #(recbuf 65536))))
 
 (defrecord ipx-socket
   (network 0)
@@ -129,8 +129,8 @@
 						    (ipx-socket-port dst)) msg)))))))
 (defun init
   ((args) (when (is_atom (car args)) (is_atom (cadr args)))
-   (let ((port (list_to_integer (atom_to_list (car args)))))
-     (let ((options (settings-udp-options (make-settings))))
+   (let* ((port (list_to_integer (atom_to_list (car args))))
+	  (options (settings-udp-options (make-settings))))
      (case args
        ((list _port-atom type-atom ip-atom) (when (is_atom ip-atom))
 	(let* (((tuple 'ok ip) (: inet_parse address (atom_to_list ip-atom)))
@@ -142,7 +142,7 @@
 	(let (((tuple 'ok socket) (: gen_udp open port
 				  (cons (tuple 'fd (list_to_integer (atom_to_list fd-atom)))
 					options))))
-	  (tuple 'ok (tuple socket ())))))))))
+	  (tuple 'ok (tuple socket ()))))))))
 ;(defun terminate (_reason state)
 ;  (let (((tuple fd _calls-list) state))
 ;    (: gen_udp close fd)))
@@ -150,17 +150,19 @@
 (defun handle_info (fd lists)
   ;(let (((tuple 'udp fd ip port msg) info))
   (let (((tuple procs ignore clients) lists))
+  (flet ((ignored? (x) (: lists any (lambda (y) (== y x)) ignore)))
   (: inet setopts fd (list #(active once)))
   (receive ((tuple 'udp fd ip port msg)
-	    (let ((sin (cons ip port)))
-	      ; don't process bogus clients
-	      (case (: lists any (lambda (x) (== x sin)) ignore)
-		('false
-		 (let ((pid (spawn_link 'ipxerlay 'process_msg (list (self) (make-client ip port msg)))))
-		       (handle_info fd (setelement 1 lists (cons (make-client ip port pid) procs)))))
-		('true
-		 (: io format '"Ignored: ~p, ignore: ~p~n" (list sin ignore))
-		 (handle_info fd lists)))))
+	   (let ((sin (cons ip port)))
+	     ; don't process bogus clients
+	     (case (ignored? sin)
+	       ('false
+		(: io format '"Got message from ~p~n" (list sin))
+		(let ((pid (spawn_link 'ipxerlay 'process_msg (list (self) (make-client ip port msg)))))
+		  (handle_info fd (setelement 1 lists (cons (make-client ip port pid) procs)))))
+	       ('true
+		(: io format '"Ignored: ~p, ignore: ~p~n" (list sin ignore))
+		(handle_info fd lists)))))
 	   ((tuple _ pid 'normal)
 	    (handle_info fd (setelement 1 lists (: lists filter (lambda (x) (/= (element 2 x) pid)) procs))))
 	   ;; lot of synchronous pokery
@@ -171,9 +173,7 @@
 		   (: io format '"Trying to send to: ~p, clients: ~p~n" (list sin clients))
 		   (if (/= target 'false)
 		     (let ((elm (element 1 target)))
-		       (: gen_udp send fd (car elm) (cdr elm) msg))
-		     ; we'll remove it during cleanup
-		     ))
+		       (: gen_udp send fd (car elm) (cdr elm) msg))))
 		 (handle_info fd lists))
 		('bcst
 		 (: lists foreach (lambda (x) (let ((elm (element 1 x)))
@@ -188,8 +188,12 @@
 	   ;;
 	   ((tuple _ pid _)
 	    ; it must be in the list
-	    (let ((elm (: lists keyfind pid 2 procs)))
-		(handle_info fd (tuple (: lists delete elm procs) (cons (element 1 elm) ignore) clients))))))
+	    (let* ((elm (: lists keyfind pid 2 procs))
+		   (newprocs (: lists delete elm procs))
+		   (sin (element 1 elm)))
+	      (if (ignored? sin)
+		(handle_info fd (setelement 1 lists newprocs))
+		(handle_info fd (tuple newprocs (cons sin ignore) clients))))))))
     ;(tuple 'noreply state))
 )
 (defun start_link (args)
