@@ -103,7 +103,7 @@
   `(tuple (cons ,ip ,port) ,arg))
 
 (defun process_msg (parent arg)
-  (let* (((tuple (= (cons ip p) sin) msg) arg)
+  (let* (((tuple (cons ip p) msg) arg)
 	 ; better than using header sock opt
 	((binary (header binary (size 30)) (_rest bytes)) msg)
 	(struct (unpack header)))
