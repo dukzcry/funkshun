@@ -8,4 +8,4 @@ fi
 # to = allowed idle timeout in msecs
 # port = portnum | 0 for random
 # (to port inet|inet6 addr) | (to port fd)
-erl -pa . -s ipxerlay start_link 900000 4899 inet 192.168.1.6
+erl -pa . -s ipxerlay start_link 900000 2130 inet 0.0.0.0
