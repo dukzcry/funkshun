@@ -10,50 +10,41 @@
   `[220 20 60])
 
 (defrecord+ :data
-  {screen {800 600}}
+  {screen (800 . 600)}
   {fov 75}
   {pov ((50 . 80) . (50 . 50))}
   {objs [((crimson) . [((10 . 20) . (20 . -10)) ((0 . -20) . (-20 . 0))
-				 ((30 . 0) . (40 . 0)) ((40 . -10) . (30 . -10))])
-	      ((purple) . [((-20 . 0) . (10 . 20)) ((20 . -10) . (0 . -20))
-				((30 . -10) . (30 . 0)) ((40 . 0) . (40 . -10))])]})
+                                 ((30 . 0) . (40 . 0)) ((40 . -10) . (30 . -10))])
+              ((purple) . [((-20 . 0) . (10 . 20)) ((20 . -10) . (0 . -20))
+                                ((30 . -10) . (30 . 0)) ((40 . 0) . (40 . -10))])]})
 
 (ns ngranek
-    (require gl glu wx
-	     (wxFrame :as wxframe)
-	     (wxWindow :as wxwindow
-		       ;:rename ((createStatusBar/2 createbar))
-		       )
-	     (wxMenu :as wxmenu)
-	     (wxMenuBar :as wxbar)
-	     (wxGLCanvas :as wxglcanvas)
-	     ngranek-data erlang)
+    (require (wxFrame :as wxframe) (wxWindow :as wxwindow ;:rename ((createStatusBar/2 createbar))
+					     )
+	     (wxMenu :as wxmenu) (wxMenuBar :as wxbar)
+	     (wxGLCanvas :as wxglcanvas) (gb_trees :joxify)
+	     ngranek-data erlang gl glu wx)
     (use io erlang joxa-core math lists)
     ;(include-lib 'wx/include/wx.hrl')
 )
 
-;; helpers
-(defn unfold (beg pred fun cons inc acc)
-  (if (pred beg)
-     (unfold (inc beg) pred fun cons inc (cons (fun beg) acc))
-    acc ;(reverse acc)
-    ))
+;(defmacro get-xf (vface dot)
+;  `(fn (y) (erlang/+ (fdiv (* (hd ~vface) (erlang/- y (tl ~dot))) (tl ~vface)) (hd ~dot))))
 
-(defn unfold (beg pred fun cons inc)
-  (unfold beg pred fun cons inc []))
+;(defmacro incrf (dir-inc)
+;  `(fn (dot) (let* (x (dir-inc (hd dot)))
+;			      (x . (yf x)))))
 
-;(defmacro compose (f g)
-;  `(fn (x) (~f (~g x))))
+;(defmacro dir-incr (dir add)
+;  `(if (> ~dir 0)
+;  (fn (x) (erlang/+ x ~add))
+;  (fn (x) (erlang/- x ~add))))
 
-;(defmacro multicompose (f . fs)
-;  `(foldl (fn (x) x) f fs))
-
-(defn andalso (&rest args)
-  (case args
-    ([x y]
-     (if x y :false))
-    ((_ . _)
-     (all (fn (x) x) args))))
+;(defmacro face-vrecalc (beg end recalc? p)
+;  `(if ~recalc?; 
+      ; we need a new direction
+;      (erlang/- ~end ~beg)
+;    ~p))
 
 ;(defn orelse (&rest args)
 ;  (case args
@@ -62,10 +53,32 @@
 ;    ((_ . _)
 ;     (any (fn (x) x) args))))
 
-;(defmacro non-empty? (f)
-;  `(if (== f [])
-;       :false
-;     :true))
+;(defmacro vec-rev (v)
+;  `((erlang/- (hd ~v)) . (erlang/- (tl ~v))))
+
+;; helpers
+; joxa/(incr,decr) are broken
+(defmacro incf (n)
+  `(erlang/+ ~n 1))
+
+(defmacro decf (n)
+  `(erlang/- ~n 1))
+;
+
+(defn unfold (beg pred add inc acc idx)
+  (if (pred beg)
+     (unfold (inc beg) pred add inc (add beg acc idx) (incf idx))
+    acc))
+
+(defn unfold (empty beg pred add inc)
+  (unfold beg pred add inc empty 0))
+
+(defn andalso (&rest args)
+  (case args
+    ([x y]
+     (if x y :false))
+    ((_ . _)
+     (all (fn (x) x) args))))
 
 (defn fdiv (&rest args)
   (case args
@@ -73,10 +86,13 @@
      (if (:'/=' y 0)
 	 ; joxa syntax issue workaround
 	 (:'/' x y)
-       []))
+       [] ;(:'/' x y)
+       ))
     (_
      (foldl (fn (x prod) (fdiv prod x)) (hd args) (tl args)))))
-;;
+
+(defmacro failed? (f)
+  `(if (== ~f []) :true :false))
 
 ;; vector algebra
 (defmacro dot-product (v1 v2)
@@ -101,35 +117,48 @@
 (defmacro vec-op (op v2 v1)
 	`((~op (hd ~v2) (hd ~v1)) . (~op (tl ~v2) (tl ~v1))))
 
-(defn vec-rot (v an)
-    ((erlang/- (* (hd v) (cos an)) (* (tl v) (sin an))) .
-     (erlang/+ (* (hd v) (sin an)) (* (tl v) (cos an)))))
-
-;(defmacro vec-rev (v)
-;  `((erlang/- (hd ~v)) . (erlang/- (tl ~v))))
+(defn vec-rot (v an) (let ((x . y) v
+	can (cos an) san (sin an))
+    ((erlang/- (* x can) (* y san)) .
+     (erlang/+ (* x san) (* y can)))))
 
 (defmacro vec-angle (v1 v2)
   `(acos (dot-product ~v1 ~v2)))
 
-;; ray casting
+(defmacro vec-collinear? (v1 v2)
+  `(> (dot-product ~v1 ~v2) 0))
+
+;; gb_trees fun replacements
+; intervals support
+(defmacro tree-bounds (dir)
+  `(if (gte ~dir 0)
+       (fn (x y z) (let* (key-match (gte y x))
+		     ((andalso key-match (< y z)) . key-match)))
+	   (fn (x y z) (let* (key-match (lte y x))
+			 ((andalso key-match (> y z)) . (not key-match))))))
+
+(defn get-1 (key bounds tree)
+  ;(if (== tree :nil)
+      ;;(do (format "~w not in tree~n" [key])
+	  [];)
+  (let ({key1 (end . val) left right} tree
+	(bounded? . border) (bounds key1 key end))
+    (if bounded?
+	val
+      (get-1 key bounds (if border right left)))));)
+
+(defmacro get (key dir tree)
+  `(get-1 ~key (tree-bounds ~dir) (element 2 ~tree)))
+
+; key originating
+(defn enter (key val tree) (let ((k . i) key)
+    (if (gb-trees/is-defined key tree)
+	(enter (k . (incf i)) val tree)
+      (gb-trees/insert key val tree))))
+;;
+
 (defmacro line-vn (d1 d2)
   `(vec-norm (vec-op erlang/- ~d2 ~d1)))
-
-(defmacro get-yf (vface dot)
-  ; canonical line equation
-  `(fn (x) (erlang/+ (fdiv (* (tl ~vface) (erlang/- x (hd ~dot))) (hd ~vface)) (tl ~dot))))
-
-;(defmacro get-xf (vface dot)
-;  `(fn (y) (erlang/+ (fdiv (* (hd ~vface) (erlang/- y (tl ~dot))) (tl ~vface)) (hd ~dot))))
-
-;(defmacro incrf (dir-inc)
-;  `(fn (dot) (let* (x (dir-inc (hd dot)))
-;			      (x . (yf x)))))
-
-(defmacro dir-incr (dir add)
-  `(if (> ~dir 0)
-  (fn (x) (erlang/+ x ~add))
-  (fn (x) (erlang/- x ~add))))
 
 (defn trunc-fov (pov pn ppn hfov hwidth)
   (let* (ppv (vec-op * ppn (hwidth . hwidth))
@@ -140,144 +169,190 @@
 	    newhfov)
 	  hfov)))
 
-;; shapes handling
-(defmacro face-vrecalc (beg end recalc? p)
-  `(if ~recalc?
-       ; we need a new direction
-      (erlang/- ~end ~beg)
-    ~p))
+; take precision into account
+(defn get-yf (v1 d1 v2 d2) (let* (v1-x (hd v1))
+    (if (== v1-x 0)
+	(get-yf v2 d2 v1 d1)
+      ; canonical line equation
+      (fn (x) (erlang/+ (fdiv (* (tl v1) (erlang/- x (hd d1)))
+			     v1-x)
+		       (tl d1))))))
 
 (defmacro dir-bound (dir end)
   `(if (gte ~dir 0)
        (fn (x) (lte x ~end))
      (fn (x) (gte x ~end))))
 
-(defn get-intersect (v1 v2 d1 d2)
-  ; x extracted from equation system
-  (let* (p1p3 (* (hd v1) (hd v2))
-	 p2p3 (* (tl v1) (hd v2))
-	 p1p4 (* (hd v1) (tl v2)))
-    (fdiv (erlang/+ (erlang/- (* p1p3 (erlang/- (tl d2) (tl d1))) (* p1p4 (hd d2)))
-		     (* p2p3 (hd d1)))
-	       (erlang/- p2p3 p1p4))))
+(defmacro dir-bounds (dir)
+  `(if (gte ~dir 0)
+       (fn (x y z) (andalso (gte y x) (< y z)))
+     (fn (x y z) (andalso (lte y x) (> y z)))))
 
-(defmacro find-intersect (beg end vface face-len pos side)
-  `(let* (x (get-intersect vface ~side beg pos)
-                   dot (x . ((get-yf vface beg) x)))
-     ; dot is between A & B
-     (if (andalso (< (vec-len (vec-op erlang/- beg dot)) face-len)
-                   (< (vec-len (vec-op erlang/- end dot)) face-len))
-         dot
+(defmacro dot-access (x)
+  `(if (== ~x 0)
+       (fn (dot) (tl dot))
+     (fn (dot) (hd dot))))
+
+(defn get-intersect (v1 v2 d1 d2) (let (v1-x (hd v1) v2-x (hd v2)
+		p1p3 (* v1-x v2-x) p2p3 (* (tl v1) v2-x)
+		p1p4 (* v1-x (tl v2)))
+      ; x extracted from equation system
+      (fdiv (erlang/+ (erlang/- (* p1p3 (erlang/- (tl d2) (tl d1))) (* p1p4 (hd d2)))
+		      (* p2p3 (hd d1)))
+	    (erlang/- p2p3 p1p4))))
+
+(defmacro find-intersect (beg end pos side)
+  `(let* (; we need a new direction
+	  vface (vec-op erlang/- end beg)
+		x (get-intersect vface ~side beg ~pos) dot (x . ((get-yf ~side ~pos vface beg) x))
+		access (dot-access (hd vface)))
+     ; between A & B
+     (if ((dir-bounds (access vface)) (access beg) (access dot) (access end))
+	 dot
        [])))
 
-(defmacro choose-intersect (beg end vface face-len pos side1 side2)
-  `(let* (intersect (find-intersect beg end vface face-len pos ~side1))
-     (if (== intersect [])
-	 (find-intersect beg end vface face-len pos ~side2)
-       intersect)))
+(defmacro choose-intersect (beg end pos side1 side2)
+  `(let* (intersect (find-intersect beg end ~pos ~side1))
+     (if (failed? intersect)
+	 ((find-intersect beg end ~pos ~side2) . ~side2)
+       (intersect . ~side1))))
 
-(defn gen-face-dots (beg end vface vface-delta recalc?)
-  (let* (cons (fn (x acc) (x . acc)))
-    ; moving all along the face vector
-    ;(beg .
-    (case vface
-      ((p1 . 0)
-       (let* (p (face-vrecalc (hd beg) (hd end) recalc? p1)
-	      dir-inc (dir-incr p 1)
-	      inc (fn (dot) ((dir-inc (hd dot)) . (tl beg)))
-	      within-bounds? (dir-bound p (hd end)))
-	 (unfold (inc beg)
-	       (fn (dot) (within-bounds? (hd dot)))
-	       (fn (dot) dot)
-	       cons
-	       inc)))
-      ((0 . p2)
-       (let* (p (face-vrecalc (tl beg) (tl end) recalc? p2)
-	      dir-inc (dir-incr p 1)
-	      inc (fn (dot) ((hd beg) . (dir-inc (tl dot))))
-	      within-bounds? (dir-bound p (tl end)))
-	 (unfold (inc beg)
-	       (fn (dot) (within-bounds? (tl dot)))
-	       (fn (dot) dot)
-	       cons
-	       inc)))
-      ((p1 . p2)
-       (let* (;yf (get-yf vface beg)
-		 px (face-vrecalc (hd beg) (hd end) recalc? p1)
-		 py (face-vrecalc (tl beg) (tl end) recalc? p2)
-		 dir-incx (dir-incr px (hd vface-delta))
-		 dir-incy (dir-incr py (tl vface-delta))
-		 ;inc (incrf dir-inc)
-		 inc (fn (dot) ((dir-incx (hd dot)) . (dir-incy (tl dot))))
-		 within-bounds? (dir-bound px (hd end)))
-	  (unfold (inc beg)
-		  (fn (dot) (within-bounds? (hd dot)))
-		  (fn (dot) dot)
-		  cons
-		  inc))))))
+(defmacro get-vpnf (pv ppv pov-end)
+  ; vec who's normal to the plane
+  `(fn (dot) (let* (x (get-intersect ~pv ~ppv dot pov-end) pp-dot (x . ((get-yf ~ppv pov-end ~pv dot) x)))
+	      (vec-op erlang/- dot pp-dot))))
 
-(defn face-dots (beg end vface vface-delta face-len pos pn hfov sides)
-  (if (lte (vec-angle (line-vn pos beg) pn) hfov)
+(defn gen-faces (begs ends color pvs pov-end heights tree access) (let (beg (hd begs) end (hd ends) begv (tl begs) (pv . ppv) pvs (height . hheight) heights
+	vpnf (get-vpnf pv ppv pov-end) begvpn (vpnf beg)
+	     endvpn (vpnf end)
+	     ; integerize neglecting precision
+	     beg-len (trunc (vec-len begvpn)) end-len (trunc (vec-len endvpn)))
+    ; omit blind zones
+    (if (andalso (< beg-len hheight) (vec-collinear? begvpn pv)
+		  (< end-len hheight) (vec-collinear? endvpn pv))
 
-      (if (lte (vec-angle (line-vn pos end) pn) hfov)
-	  ; all dots inclusion
-	  (gen-face-dots beg end vface vface-delta :false)
+  (let* (beg-x (get-intersect begv ppv beg pov-end) end-x (get-intersect (tl ends) ppv end pov-end)
+	       yf (get-yf ppv pov-end begv beg) access-ppv (access ppv)
+	       pp-beg (get (access (beg-x . (yf beg-x))) access-ppv tree)
+	       pp-end (get (access (end-x . (yf end-x))) access-ppv tree))
+
+    ; omit lines (a-x = b-x)
+    (if (:'/=' pp-beg pp-end)
+    
+  (let* (h-beg (erlang/- height beg-len) h-end (erlang/- height end-len))
+    (if (> beg-len end-len)
+       [h-beg beg-len pp-beg h-end end-len pp-end color]
+    [h-end end-len pp-end h-beg beg-len pp-beg color]))
+
+		 []))
+
+  [])
+      ))
+
+(defn+ faces (line color pov pvs pn sides tree access &rest args) (let ((beg . end) line (pov-beg . pov-end) pov (side1 . side2) sides [hfov heights parent] args
+      begv (vec-op erlang/- beg pov-beg))
+(send parent
+  (if (lte (vec-angle (vec-norm begv) pn) hfov)
+
+      (let* (endv (vec-op erlang/- end pov-beg))
+      (if (lte (vec-angle (vec-norm endv) pn) hfov)
+	  ; whole face
+	  (gen-faces (beg . begv) (end . endv) color pvs pov-end heights tree access)
 	; A + face part
-	(gen-face-dots beg (choose-intersect beg end vface face-len pos (hd sides) (tl sides)) vface vface-delta :true))
+	(gen-faces (beg . begv) (choose-intersect beg end pov-beg side1 side2) color pvs pov-end heights tree access)))
 
-    (if (lte (vec-angle (line-vn pos end) pn) hfov)
+    (let* (endv (vec-op erlang/- end pov-beg))
+    (if (lte (vec-angle (vec-norm endv) pn) hfov)
 	; B + face part
-	(gen-face-dots end (choose-intersect beg end vface face-len pos (hd sides) (tl sides)) vface vface-delta :true)
-      (let* (intersect (find-intersect beg end vface face-len pos (hd sides)))
-	 (if (== intersect [])
+	(gen-faces (end . endv) (choose-intersect beg end pov-beg side1 side2) color pvs pov-end heights tree access)
+      (let* (intersect (find-intersect beg end pov-beg side1))
+	 (if (failed? intersect)
 	     ; face isn't in fov
 	     []
 	   ; face is bigger than fov
-	     (gen-face-dots intersect (find-intersect beg end vface face-len pos (tl sides)) vface vface-delta :true))))
+	     (gen-faces (intersect . side1)
+			((find-intersect beg end pov-beg side2) . side2)
+			color pvs pov-end heights tree access))))
+    ))
+)
+))
+
+(defn make-faces (&rest args)
+  (fn (face) (erlang/apply :ngranek :faces (++ face args))))
+
+(defn figures-loop (list tree fun procs)
+  (receive
+   (after 0
+	  (if (== procs 0)
+	       tree
+	      (if (:'/=' list [])
+		    (do (spawn (fn () (fun (hd list))))
+			(figures-loop (tl list) tree fun procs))
+		(figures-loop list tree fun procs))))
+   ([]
+    (figures-loop list tree fun (decf procs)))
+   ((key . data)
+    (figures-loop list (enter (key . 0) data tree) fun (decf procs)))
+   (_
+    (figures-loop list tree fun procs))))
+
+(defn plane-proj (objs pov pvs pns sides &rest args) (let ((pov-beg . pov-end) pov ppv (tl pvs) side1 (hd sides)
+  beg-x (get-intersect side1 ppv pov-beg pov-end) end-x (get-intersect (tl sides) ppv pov-beg pov-end)
+		yf (get-yf ppv pov-end side1 pov-beg) access (dot-access (hd ppv))
+		access-ppn (access (tl pns))
+		inc (fn (seg) (erlang/+ seg access-ppn))
+		; unwind beg & end for safe search in tree
+		beg ((fn (x) (erlang/- x access-ppn)) (access (beg-x . (yf beg-x))))
+		less? (dir-bound (access ppv) (inc (access (end-x . (yf end-x)))))
+		;
+		faces-fun (make-faces pov pvs (hd pns) sides
+				    ; build segments tree of proj plane
+				    (unfold
+				     (gb-trees/empty)
+				     (beg . (inc beg))
+				     (fn (seg) (less? (tl seg)))
+				     (fn (seg tree idx) (gb-trees/insert (hd seg) ((tl seg) . idx) tree))
+				     (fn (seg) (let* (end (tl seg))
+						(end . (inc end)))))
+				    access args))
+    ; process faces in parallel
+    (figures-loop objs (gb-trees/empty) faces-fun (length objs))
     ))
 
-(defmacro make-face-dots (pos pn hfov sides)
-  `(fn (face) (face-dots (element 1 face) (element 2 face) (element 3 face) (element 4 face) (element 5 face) ~pos pn hfov sides)))
-;;
-
-(defn plane-dots (objs beg pn hfov sides)
-  (let* (dots-fun (make-face-dots beg pn hfov sides)
-		  ; get list of flatten lists of dots
-	 dots (foldl (fn (x acc) (++ (dots-fun x) acc))
-						 []
-						 objs))
-	dots))
-
 (defn setup-menus (frame)
-  (let (bar (wxbar/new)
-	    menu (wxmenu/new)
+  (let (bar (wxbar/new) menu (wxmenu/new)
 	    :true (wxbar/append bar menu "&File"))
     ; C-q is good too
     (wxmenu/append menu 10 "Exit")
-    (let (:ok (wxframe/connect frame :command_menu_selected)
-	      :ok (wxframe/setMenuBar frame bar))
+    (let (:ok (wxframe/connect frame :command_menu_selected) :ok (wxframe/setMenuBar frame bar))
       [])
     ;
     ))
 
-(defn draw-canvas (frame canvas)
-  ; GL_COLOR_BUFFER_BIT bor GL_DEPTH_BUFFER_BIT
-  (gl/clear 16640)
+(defn draw-canvas (iter tree color)
+  (case (gb-trees/next iter)
+    ({(a-y1 . _) [a-y2 a-x b-y1 b-y2 b-x color2] iter2}
 
-  (gl/begin 0) ; GL_POINTS
-  (gl/vertex2i 50 40)
+  (gl/begin 7) ; GL_QUADS
+  (when (:'/=' color color2)
+    (erlang/apply :gl :color3ub color2))
+  (gl/vertex2i a-x a-y1)
+  (gl/vertex2i a-x a-y2)
+  (gl/vertex2i b-x b-y2)
+  (gl/vertex2i b-x b-y1)
   (gl/end)
 
-  (wxglcanvas/swapBuffers canvas)
-  (wxwindow/getSize frame))
+  (draw-canvas iter2 tree color2))
+    (:none
+     [])
+    ))
 
 (defn gui-loop (frame canvas)
   (receive
    (after 200
-
-	  (draw-canvas frame canvas)
-	  (let (0 (gl/getError))
-	       (gui-loop frame canvas)))
+	  ;(draw-canvas frame canvas)
+	  ;(let (0 (gl/getError))
+	  (gui-loop frame canvas));)
    ({:wx _ _ _ {wxClose :close_window}}
     :ok)
    ({:wx 10 _ _ _}
@@ -290,50 +365,54 @@
     (gui-loop frame canvas))))
 
 (defn+ start ()
-  (let (wx (wx/new)
-	   data (ngranek-data/make-fields [])
-	   screen (ngranek-data/screen data)
-	   frame (wxframe/new wx 1 "Ray casting shit" [{:size screen}
+  (let (wx (wx/new) data (ngranek-data/make-fields [])
+	   (width . height) (ngranek-data/screen data) frame (wxframe/new wx 1 "Ray casting shit" [{:size {width height}}
 							    ; wxDEFAULT_FRAME_STYLE band bnot
 							    ; wxRESIZE_BORDER band bnot 
 							    ; wxMAXIMIZE_BOX
-							    ;{:style 541072384}
+							    {:style 541072384}
 							    ])
 	   ; working close
-	   :ok (wxframe/connect frame :close_window))
-    ; (wxframe/createStatusBar frame)
+	   :ok (wxframe/connect frame :close_window)) ; (wxframe/createStatusBar frame)
     (setup-menus frame)
     (let* (canvas (wxglcanvas/new frame)
-		  pov (ngranek-data/pov data) pv (vec-op erlang/- (tl pov) (hd pov)) pn (vec-norm pv)
-		  hfov (trunc-fov pov pn (vec-norm (vec-perp pv :left))
-				  (fdiv (fdiv (* (ngranek-data/fov data) (pi)) 180) 2)
-				  (:'/' (element 1 screen) 2))
-		  ; precalc vectors & lens, assign colors
-		  objs (flatmap (fn (item) (map
-					 (fn (face) (let* (vface (vec-op erlang/- (tl face) (hd face))
-								 len (vec-len vface)
-								 norm (fn (v)
-									(let* (mul (fdiv 1 len))
-									  ((abs (* (hd v) mul)) . (abs (* (tl v) mul))))))
-							  {(hd face) (tl face) vface (norm vface) len (hd item)}))
-						 (tl item)))
-			    (ngranek-data/objs data))
-		  side1-pv (vec-rot pv hfov) side2-pv (vec-rot pv (erlang/- hfov)))
+		  ;; initial
+		  pov (ngranek-data/pov data) pv (vec-op erlang/- (tl pov) (hd pov))
+		  pn (vec-norm pv) ppv (vec-perp pv :right)
+		  ;; constant
+		  fov (ngranek-data/fov data) hfov (trunc-fov pov pn (vec-norm ppv)
+				  (fdiv (fdiv (* fov (pi)) 180) 2)
+				  (:'/' width 2))
+		  heights (height . (:'/' height 2)) parent (self)
+		  ; assign colors
+		  objs (flatmap (fn (item) (let* (color (hd item))
+				    (map (fn (face) [face color])
+					 (tl item))))
+				(ngranek-data/objs data)))
+                  ;;
+      ; don't loop in get-yf
+      (when (== fov 0)
+	(throw {:line ($line-number)}))
       (wxwindow/connect canvas :motion)
       (wxwindow/show frame)
       (wxglcanvas/setCurrent canvas)
       (gl/clearColor 0 0 0 0)
       (gl/clearDepth 1)
 
-      (gl/color3ub 220 20 60)
-      (gl/pointSize 10)
       (gl/matrixMode 5889) ; GL_PROJECTION
       (gl/loadIdentity)
-      (glu/ortho2D 0 (element 1 screen) 0 (element 2 screen))
+      (glu/ortho2D 0 width 0 height)
 
-      (format "~p~n" [
-		      (plane-dots objs (hd pov) pn hfov (side1-pv . side2-pv))
-      ])
+      ; GL_COLOR_BUFFER_BIT bor GL_DEPTH_BUFFER_BIT
+      (gl/clear 16640)
+      (let* (tree (plane-proj objs pov (pv . ppv) (pn . (vec-norm ppv))
+			      (; left
+			       (vec-rot pv hfov) . 
+			       (vec-rot pv (erlang/- hfov)))
+			      hfov heights parent))
+	(draw-canvas (gb-trees/iterator tree) tree []))
+      (wxglcanvas/swapBuffers canvas)
+      (wxwindow/getSize frame)
 
       (gui-loop frame canvas)
       (wx/destroy))))
