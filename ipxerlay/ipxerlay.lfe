@@ -175,7 +175,7 @@
 	    (handle_info fd to (set-procs (: lists filter (lambda (x) (/= (element 2 x) pid)) procs))))
 	   ;; lot of synchronous pokery
 	   ((tuple type (= (tuple (= (cons ip port) sin) arg) client) msg)
-	    (if (or (== type 'single) (== type 'bcst))
+	    (if (orelse (== type 'single) (== type 'bcst))
 	      (let ((newclients (clean-clients)))
 	      (case type
 		('single
