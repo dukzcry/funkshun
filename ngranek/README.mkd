@@ -1,0 +1,18 @@
+##[Ngranek](http://en.wikipedia.org/wiki/Oriab#Ngranek) - a raycaster in Erlang
+
+2.5D. Interactive. Parallel. Has no closed space requirement. Doesn't draw by columns like most raycasters do. All for not being too much boring
+
+![screen](http://dukzcry.cc/screencaps/rayshit.png)
+
+###Requirements
+- [joxa](https://github.com/erlware/joxa/downloads) Lisp v0.1.2
+- wxErlang with OpenGL support. OpenGL is used solely to draw 2D while having no external deps like esdl
+
+###Get it running
+```
+joxa -c ngranek.jxa
+erl -run ngranek
+```
+
+###Interacting
+Use your WASD keys, luke!
