@@ -2,7 +2,7 @@
 
 2.5D. Interactive. Parallel. Has no closed space requirement. Doesn't draw by columns like most raycasters do. All for not being too much boring
 
-![screen](http://dukzcry.cc/screencaps/rayshit.png)
+![screen](http://dukzcry.cc/screencaps/raycrap.png)
 
 ###Requirements
 - [joxa](https://github.com/erlware/joxa/downloads) Lisp v0.1.2
@@ -16,3 +16,19 @@ erl -run ngranek
 
 ###Interacting
 Use your WASD keys, luke!
+
+To modify the world in runtime, first obtain a process id:
+```
+erl
+> Pid = spawn(fun() -> ngranek:start() end).
+```
+Now send the commands using following format:
+```
+> Pid ! {ngranek, cmd}.
+for getting value
+> Pid ! {ngranek, cmd, Val}.
+for setting value
+```
+Currently supported commands are:
+- pov - figure out what you are or teleport to a new location
+- objs - get the list of scene objects or construct a new scene

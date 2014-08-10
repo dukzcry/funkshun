@@ -1,3 +1,5 @@
+; Written by Artem Falcon <lomka@gero.in>
+
 (require-extension bind)
 (bind* "double cpu_burn(double);")
 

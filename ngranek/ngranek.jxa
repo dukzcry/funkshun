@@ -1,28 +1,42 @@
-; Written by A. V. Lukyanov <lomka@gero.in>
+;; Written by A. V. Lukyanov <lomka@gero.in>
+
+; What i do here is basically a set of following steps:
+; 1) Build a tree of segments which will be used for obtaining of fixed X ordinates independently of a projection plane rotate position, every PP segment gets an index from 0 to N;
+; 2) Start parallel processing of faces for futher scene drawing, we handle only terminal dots. We get intersections with PP and obtain proper X'es by searching in 1), while Y's are calculated as on the distance of a perpendecular from a dot to PP. We create pairs of dots for the each end, since we're moving into pseudo-3D space. Here we collect these given dots into a new tree which is now a scene composition;
+; 3) Traverse a tree from 2) and draw the elements. That's all.
 
 (ns ngranek-data
     (use
      ; old style
      (joxa-records :only (defrecord+/2)) (joxa-core :only (define/2))))
 
+(define crimson '[220 20 60])
 (define purple '[128 0 128])
 
-(define crimson '[220 20 60])
+;(define unmellow '[255 255 120])
+;(define lime '[50 205 50])
+
+;(define baby '[137 207 240])
+;(define cadet '[29 41 81])
 
 (defrecord+ :data
   {screen (800 . 600)}
+  ; hd = our, tl = focal lens positions
   {pov ((0 . 40) . (0 . 10))}
   {step 20}
   ; 2d figures
-  {objs [((crimson) . [((240 . -70) . (0 . -20)) ((0 . -240) . (-240 . -70))])
-              ((purple) . [((0 . -20) . (-240 . -70)) ((240 . -70) . (0 . -240))])]})
+  {objs [((purple) . [((240 . -70) . (0 . -20)) ((0 . -240) . (-240 . -70))])
+              ((crimson) . [((0 . -20) . (-240 . -70)) ((240 . -70) . (0 . -240))])]})
 
 (ns ngranek
     (require (wxFrame :as wxframe) (wxWindow :as wxwindow)
 	     (wxMenu :as wxmenu) (wxMenuBar :as wxbar)
-	     (wxGLCanvas :as wxglcanvas) (gb_trees :joxify)
+	     (wxStatusBar :as wxstatbar) (wxGLCanvas :as wxglcanvas)
+	     (gb_trees :joxify) (io_lib :joxify)
 	     ngranek-data erlang gl glu wx joxa-lists)
     (use io erlang joxa-core math lists))
+
+(define zero '(0 . 0))
 
 ;; helpers
 ; incr/decr are broken in joxa compiler
@@ -45,7 +59,7 @@
   `(if ~x ~y :false))
 
 (defn failed? (f)
-  (if (== f []) :true :false))
+  (== f []))
 
 ;; vector algebra
 (defn dot-product (v1 v2)
@@ -153,7 +167,9 @@
 		x (get-intersect vface beg side pov-beg) dot (x . ((get-yf side pov-beg vface beg) x))
 		access (dot-access (hd vface)))
      ; between A & B
-     (if ((dir-bounds (access vface)) (access beg) (access dot) (access end))
+     (if (and ((dir-bounds (access vface)) (access beg) (access dot) (access end))
+	      ; sitting on the face is not an intersect
+	      (not (== dot pov-beg)))
 	 dot
        [])))
 
@@ -171,15 +187,13 @@
 (defn gen-faces (begs ends color pvs pov heights tree acs)
   ; to-do: fixup
   (if (== (hd ends) [])
-      (do (format "intersect botch~n")
+      (do (format "Intersect botch~n")
 	  [])
   (let ((beg . begv) begs (end . endv) ends (pv . ppv) pvs (pov-beg . pov-end) pov (height . hheight) heights (access . access-ppn) acs
-
 	; gives ok perspective
-	vpnf (get-vpnf pv ppv pov-end) begvpn (vpnf beg) endvpn (vpnf end)
-	
-	fl-beg-len (vec-len begvpn) fl-end-len (vec-len endvpn))
-    ; omit too far & inside pov objs
+	vpnf (get-vpnf pv ppv pov-end) begvpn (vpnf beg) endvpn (vpnf end))
+    ; omit inside pov objs
+    ; to-do: rework skipping of too far objs, shouldn't be that way depended on win height 
     (if (and (< (vec-len begv) hheight) (vec-collinear? begvpn pv)
 		  (< (vec-len endv) hheight) (vec-collinear? endvpn pv))
 
@@ -196,7 +210,8 @@
     ; omit lines (a-x = b-x)
     ;(if (!= pp-beg pp-end)
     
-  (let* (h-beg (erlang/- height fl-beg-len) h-end (erlang/- height fl-end-len))
+  (let* (fl-beg-len (vec-len begvpn) fl-end-len (vec-len endvpn)
+	 h-beg (erlang/- height fl-beg-len) h-end (erlang/- height fl-end-len))
     ;(format "~p" [(beg . end)])
     ; we use middle point of face
        [(:'/' (erlang/+ h-beg h-end) 2)
@@ -211,15 +226,11 @@
     ))))
 
 (defn faces (line color pns tree acs sides pov hfov heights parent) (let ((beg . end) line (side1 . side2) sides pov-beg (hd pov) pn (hd pns)
-      begv (vec-op erlang/- beg pov-beg))
+      begv (vec-op erlang/- beg pov-beg) endv (vec-op erlang/- end pov-beg))
 (send parent
-      ; don't trash when going thru the face
-  (if (== begv (0 . 0))
+  ; don't trash when going thru the face
+  (if (or (== begv (zero)) (== endv (zero)))
       []
-  (let* (endv (vec-op erlang/- end pov-beg))
-  (if (== endv (0 . 0))
-      []
-    ;
   (if (lte (vec-angle (vec-norm begv) pn) hfov)
 
       (if (lte (vec-angle (vec-norm endv) pn) hfov)
@@ -236,14 +247,13 @@
 	(if (andalso (not (failed? intersect1)) (lte (vec-angle (vec-norm (vec-op erlang/- intersect1 pov-beg)) pn) hfov))
 	    (let* (intersect2 (find-intersect beg end pov-beg side2))
 	      (if (andalso (not (failed? intersect2)) (lte (vec-angle (vec-norm (vec-op erlang/- intersect2 pov-beg)) pn) hfov))
-		  ;
 		  ; face is bigger than fov
 		  (gen-faces (intersect1 . side1) (intersect2 . side2) color pns pov heights tree acs)
 		; face is not in fov
 		[]))
 	      []))
       ;
-))))))))
+))))))
 
 (defn figures-handler (list tree fun procs)
   (receive
@@ -297,7 +307,7 @@
  (let* (tree (plane-proj objs pns side-dots sides pov hfov heights parent))
   (gl/clear 16384) ; GL_COLOR_BUFFER_BIT
   (draw-canvas (gb-trees/iterator tree) tree [])
-  ;(format "drawn ~w faces~n" [(element 1 tree)])
+  ;(format "Drawn ~w faces~n" [(element 1 tree)])
   (wxglcanvas/swapBuffers canvas)
   ;(let (0 (gl/getError))
   ))
@@ -319,6 +329,7 @@
 	 (let* (inc (if (== key 87) (fn (x y) (erlang/+ x y)) (fn (x y) (erlang/- x y))) pov-end (vec-op inc (tl pov) step-mul)
 		    pov-new ((vec-op inc (hd pov) step-mul) . pov-end) side-dots-new (get-side-dots pov-end (tl pns) hwidth))
 
+	   (wxframe/setStatusText frame (io-lib/format "POV: ~p" [pov-new]))
 	   (render-scene canvas objs pov-new pns sides side-dots-new hfov heights parent)
 	   (event-handler canvas parent steps frame objs pov-new pns sides side-dots-new hfov hwidth heights step-mul)))
       ; turn around
@@ -327,6 +338,7 @@
 	 (let (pov-beg (hd pov) pov-new (pov-beg . (vec-rot (tl pov) pov-beg (if (== key 65) (tl steps) (erlang/- (tl steps)))))
 		       [pns-new side-dots-new sides-new] (recalc-plane pov-new hwidth))
 
+	   (wxframe/setStatusText frame (io-lib/format "POV: ~p" [pov-new]))
 	   (render-scene canvas objs pov-new pns-new sides-new side-dots-new hfov heights parent)
 	   (event-handler canvas parent steps frame objs pov-new pns-new sides-new side-dots-new hfov hwidth heights (vec-scal-mul (hd pns-new) (hd steps)))))
       (_
@@ -335,6 +347,7 @@
     ; to-do: if only height or either width got changed, do just relevant recalcs
     (let* (hwidth-new (div width 2) side-dots-new (get-side-dots (tl pov) (tl pns) hwidth-new) sides-new (get-sides (hd pov) side-dots-new)
 		       hfov-new (vec-angle (vec-norm (hd sides-new)) (hd pns)) heights-new (height . (div height 2)))
+
       (gl/loadIdentity)
       (gl/viewport 0 0 width height) (glu/ortho2D 0 width 0 height)
       (render-scene canvas objs pov pns sides-new side-dots-new hfov-new heights-new parent)
@@ -346,13 +359,50 @@
     :ok)
    ;({'_wxe_error_' _ _}
     ;:fail)
+   ({:ngranek cmd}
+    (case cmd
+      (:pov
+       (format "You're ~p~n" [pov]))
+      (:objs
+       (format "~p~n" [objs]))
+      (_
+       []))
+    (event-handler canvas parent steps frame objs pov pns sides side-dots hfov hwidth heights step-mul))
+   ({:ngranek :pov pov-new}
+    (case pov-new
+      (((zero) . (zero))
+       (event-handler canvas parent steps frame objs pov pns sides side-dots hfov hwidth heights step-mul))
+      (((x1 . y1) . (x2 . y2)) (when (and (is_number x1) (is_number y1) (is_number x2) (is_number y2)))
+       (let ([pns-new side-dots-new sides-new] (recalc-plane pov-new hwidth))
+	 (wxframe/setStatusText frame (io-lib/format "POV: ~p" [pov-new]))
+	 (render-scene canvas objs pov-new pns-new sides-new side-dots-new hfov heights parent)
+	 (event-handler canvas parent steps frame objs pov-new pns-new sides-new side-dots-new hfov hwidth heights (vec-scal-mul (hd pns-new) (hd steps)))))
+      (_
+       (event-handler canvas parent steps frame objs pov pns sides side-dots hfov hwidth heights step-mul))))
+   ({:ngranek :objs new-objs}
+    (case new-objs
+      (_ (when (is_list new-objs))
+	 (if (all (fn (elm) (case elm
+			      ((((= (x1 . y1) beg) . (= (x2 . y2) end)) . [r g b]) (when (and (is_number x1) (is_number y1) (is_number x2) (is_number y2)
+										      (is_integer r) (is_integer g) (is_integer b)))
+			       ; no vector, no face!
+			       (!= (vec-op erlang/- end beg) (zero)))
+			      (_
+			       :false)))
+		  new-objs)
+	     (do (render-scene canvas new-objs pov pns sides side-dots hfov heights parent)
+		 (event-handler canvas parent steps frame new-objs pov pns sides side-dots hfov hwidth heights step-mul))
+	   (event-handler canvas parent steps frame objs pov pns sides side-dots hfov hwidth heights step-mul)))
+      (_
+       (event-handler canvas parent steps frame objs pov pns sides side-dots hfov hwidth heights step-mul))))
    (event
     ;(format "Received ~p~n" [event])
     (event-handler canvas parent steps frame objs pov pns sides side-dots hfov hwidth heights step-mul))))
 
 (defn+ start ()
-  (let (data (ngranek-data/make-fields []) (width . height) (ngranek-data/screen data)
-	     frame (wxframe/new (wx/new) 1 "Ray casting shit by dukzcry" [{:size {width height}}]) bar (wxbar/new)
+  (let (data (ngranek-data/make-fields []) (width . _height) (ngranek-data/screen data)
+	     frame (wxframe/new (wx/new) 1 "ngranek raycaster by dukzcry" [{:size {width _height}}]) bar (wxbar/new)
+	     statbar (wxframe/createStatusBar frame [{:number 1}]) height (element 2 (wxwindow/getClientSize frame))
 	     menu (wxmenu/new) canvas (wxglcanvas/new frame)
 	     pov (ngranek-data/pov data) step (ngranek-data/step data)
 	     heights (height . (div height 2)) hwidth (div width 2)
@@ -363,12 +413,15 @@
 				      (joxa-lists/map (face (tl item)) (face . color))))
 			 (ngranek-data/objs data)))
     (wxframe/connect frame :close_window) (wxframe/connect frame :command_menu_selected) (wxframe/setMenuBar frame bar)
+    ;(wxstatbar/setStatusWidths statbar [-1 150])
     (wxbar/append bar menu "&File")
     (wxmenu/append menu 10 "Exit")
     (wxwindow/show frame)
     (wxwindow/connect canvas :size) (wxwindow/connect canvas :key_down)
-    (wxglcanvas/setCurrent canvas) (glu/ortho2D 0 width 0 height)
-    
+    (wxglcanvas/setCurrent canvas)
+    (gl/viewport 0 0 width height) (glu/ortho2D 0 width 0 height)
+
+    (wxframe/setStatusText frame (io-lib/format "POV: ~p" [pov]))
     (render-scene canvas objs pov pns sides side-dots hfov heights parent)
     
     (event-handler canvas parent (step . (* step 0.01)) frame objs pov pns sides side-dots hfov hwidth heights (vec-scal-mul pn step))
