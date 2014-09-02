@@ -2,8 +2,6 @@
 
 2.5D. Interactive. Parallel. Has no closed space requirement. Doesn't draw by columns like most raycasters do. All for not being too much boring
 
-![screen](http://dukzcry.cc/screencaps/raycrap.png)
-
 ###Requirements
 - [joxa](https://github.com/erlware/joxa/downloads) Lisp v0.1.2
 - wxErlang with OpenGL support. OpenGL is used solely to draw 2D while having no external deps like esdl
