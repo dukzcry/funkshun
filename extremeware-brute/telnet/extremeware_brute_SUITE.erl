@@ -1,6 +1,7 @@
+-module(extremeware_brute_SUITE).
+
 -author('Artem Falcon <lomka@gero.in>').
 
--module(extremeware_brute_SUITE).
 -export([all/0,suite/0,main/1]).
 
 -record(settings,{threads,limit,command,error,error_mp=undefined,positions=undefined}).

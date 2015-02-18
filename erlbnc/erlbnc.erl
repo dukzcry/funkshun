@@ -1,6 +1,7 @@
+-module(erlbnc).
+
 -author('A.V. Lukyanov <lomka@gero.in').
 
--module(erlbnc).
 -export([start/0]).
 
 -define(TIMEOUT,20000).
@@ -69,12 +70,20 @@ client(S) ->
 	 		 	  R
 	 	    end,
 	 JID = exmpp_jid:make(binary_to_list(Login),binary_to_list(Domain),Resource),
-	 {RemoteHandler,RemoteSession} = connect(JID,binary_to_list(Password)),
+	 {RemoteHandler,RemoteSession,Messages,TableName} = connect(JID,binary_to_list(Password)),
 	 ok = send(S,exmpp_server_binding:bind(BindWorkaround,JID)),
 	 Session = getandparse(S,0),
 	 SessionWorkaround = Session#xmlel{ns = ?NS_JABBER_CLIENT},
-	 % psi wants to set session even if we don't advertise this feature
+	 % psi wants to set session even if we don't advert this feature
 	 ok = send(S,exmpp_server_session:establish(SessionWorkaround)),
+
+	 % todo put in better place
+	 case Messages of
+	      [] -> true;
+	      M ->
+	      	lists:foreach(fun({_,_,Message}) -> send(S,Message) end,lists:sort(M)),
+		mnesia:transaction(mnesia:clear_table(TableName))
+	 end,
 
 	 P = exmpp_xml:start_parser([{root_depth,1}]),
 	 % since root elm is lost
@@ -86,7 +95,7 @@ client(S) ->
 
 bnc_status(S) ->
 	   exmpp_session:send_packet(S,exmpp_presence:set_status(exmpp_presence:set_show(exmpp_presence:available(),'xa'),"erlbnc")).
-% todo handle pings, stream ends
+% todo catch pings, stream ends, from/to spoofs for server changed resources
 client_handler(So,Se,P) ->
 	 inet:setopts(So,[{active,once}]),
 	 receive
@@ -115,39 +124,59 @@ client_handler(So,Se,P) ->
 		gen_tcp:send(So,Binary),
 	 	client_handler(So,Se,P);
 	 _Catchall ->
-			server_handler(So,Se,P)
+			client_handler(So,Se,P)
 	 end.
+
+-record(messages,{id,msg}).
+
 -include_lib("exmpp/include/exmpp_client.hrl").
-server_handler(S,P,J) ->
+server_handler(S,P,Id,J,T) ->
 	 receive
-	 % todo restart
 	 stop ->
 	      %io:format("server discon~n"),
-	      exmpp_session:stop(S);
-	 #received_packet{raw_packet=Packet} ->
-		%P ! exmpp_xml:set_attribute(Packet, <<"to">>, J),
-		P ! Packet,
-	 	server_handler(S,P,J);
+	      exmpp_session:stop(S);	
+	 Record = #received_packet{raw_packet=Packet} ->
+	 	case is_process_alive(P) of
+		     true ->
+		     	  %P ! exmpp_xml:set_attribute(Packet,<<"to">>,J),
+		     	  P ! Packet,
+			  server_handler(S,P,Id,J,T);
+		     false when Record#received_packet.packet_type == message orelse
+		     	   	(Record#received_packet.packet_type == 'presence' andalso
+				 (Packet#received_packet.type_attr == "subscribe" orelse
+				  Packet#received_packet.type_attr == "subscribed")) ->
+		     	  F = fun() -> mnesia:dirty_write(T,#messages{id=Id,msg=Packet}) end,
+			  mnesia:transaction(F),
+			  server_handler(S,P,Id+1,J,T);
+		     _Catchall ->
+		     	  server_handler(S,P,Id,J,T)
+		end;
 	 P1 when is_pid(P1) ->
-	 	 server_handler(S,P1,J);
+	 	 server_handler(S,P1,0,J,T);
 	 _Catchall ->
-	 	server_handler(S,P,J)
+	 	server_handler(S,P,Id,J,T)
 	 end.
 
 -record(sessions,{jid,pid,session}).
 
 connect(J,P) ->
+	FullJID = exmpp_jid:to_binary(J),
+	TableName = binary_to_atom(FullJID,latin1),
 	Session = server(J,P),
 	case find_session(J) of
 	     [Record] ->
 	     	exmpp_session:stop(Session),
-		{Record#sessions.pid,Record#sessions.session};
+		F = fun() -> mnesia:dirty_select(TableName,[{'_',[],['$_']}]) end,
+		{_,Messages} = mnesia:transaction(F),
+		{Record#sessions.pid,Record#sessions.session,Messages,TableName};
 	     [] ->
-	     	Pid = spawn(fun() -> server_handler(Session,[],exmpp_jid:to_binary(J)) end),
+	     	Pid = spawn(fun() -> server_handler(Session,[],0,FullJID,TableName) end),
 		% todo kill proc on error
 		ok = exmpp_session:set_controlling_process(Session,Pid),
 	     	{_,ok} = insert_session(J,Pid,Session),
-		{Pid,Session}
+		% table per jid for safe dirty ops
+		mnesia:create_table(TableName,[{record_name,messages},{attributes,record_info(fields,messages)}]),
+		{Pid,Session,[],[]}
 	end.
 
 init_db() ->
@@ -155,11 +184,9 @@ init_db() ->
 	mnesia:start(),
 	mnesia:create_table(sessions,[{attributes,record_info(fields,sessions)}]).
 find_session(J) ->
-		  SR = #sessions{jid=J,_='_'},
-		  F = fun() -> mnesia:match_object(SR) end,
+		  F = fun() -> mnesia:match_object(#sessions{jid=J,_='_'}) end,
 		  {atomic,MR} = mnesia:transaction(F),
 		  MR.
 insert_session(J,P,S) ->
-		SR = #sessions{jid=J,pid=P,session=S},
-		 F = fun() -> mnesia:write(SR) end,
+		 F = fun() -> mnesia:write(#sessions{jid=J,pid=P,session=S}) end,
 		 mnesia:transaction(F).
