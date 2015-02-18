@@ -1,7 +1,8 @@
 #!/usr/bin/env escript
 %%! -smp enable
 
-% Written by Artem Falcon <lomka@gero.in>
+-author('Artem Falcon <lomka@gero.in>').
+
 -mode(native).
 
 -record(settings,{limit=9999999,command="enable license fullL3 ",error="ERROR",prompt="#",
