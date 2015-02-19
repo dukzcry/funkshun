@@ -1,6 +1,6 @@
--module(erlbnc).
+-module(eggbnc).
 
--author('A.V. Lukyanov <lomka@gero.in').
+-author('A.V. Lukyanov <lomka@gero.in>').
 
 -export([start/0]).
 
@@ -31,6 +31,7 @@ accept(LS) ->
 	  	gen_tcp:controlling_process(Socket,Pid),
 		accept(LS);
 	       _Catchall ->
+	       erlang:sleep(60000),
 	       accept(LS)
 	  end.
 
@@ -65,7 +66,7 @@ client(S) ->
 	 BindWorkaround = Bind#xmlel{ns = ?NS_JABBER_CLIENT},
 	 Resource = case exmpp_server_binding:wished_resource(BindWorkaround) of
 	 	    	 undefined ->
-	 		 	   "erlbnc";
+	 		 	   "eggbouncer";
 	 		 R ->
 	 		 	  R
 	 	    end,
@@ -81,6 +82,7 @@ client(S) ->
 	 case Messages of
 	      [] -> true;
 	      M ->
+	      	%io:format("off msgs ~p~n", M),
 	      	lists:foreach(fun({_,_,Message}) -> send(S,Message) end,lists:sort(M)),
 		mnesia:transaction(mnesia:clear_table(TableName))
 	 end,
@@ -94,8 +96,8 @@ client(S) ->
 	 client_handler(S,RemoteSession,P).
 
 bnc_status(S) ->
-	   exmpp_session:send_packet(S,exmpp_presence:set_status(exmpp_presence:set_show(exmpp_presence:available(),'xa'),"erlbnc")).
-% todo catch pings, stream ends, from/to spoofs for server changed resources
+	   exmpp_session:send_packet(S,exmpp_presence:set_status(exmpp_presence:set_show(exmpp_presence:available(),'xa'),"eggbouncer")).
+% todo catch pings, stream ends, spoof from/to for server changed resources
 client_handler(So,Se,P) ->
 	 inet:setopts(So,[{active,once}]),
 	 receive
@@ -134,7 +136,7 @@ server_handler(S,P,Id,J,T) ->
 	 receive
 	 stop ->
 	      %io:format("server discon~n"),
-	      exmpp_session:stop(S);	
+	      exmpp_session:stop(S);
 	 Record = #received_packet{raw_packet=Packet} ->
 	 	case is_process_alive(P) of
 		     true ->
@@ -145,8 +147,7 @@ server_handler(S,P,Id,J,T) ->
 		     	   	(Record#received_packet.packet_type == 'presence' andalso
 				 (Packet#received_packet.type_attr == "subscribe" orelse
 				  Packet#received_packet.type_attr == "subscribed")) ->
-		     	  F = fun() -> mnesia:dirty_write(T,#messages{id=Id,msg=Packet}) end,
-			  mnesia:transaction(F),
+			  insert_message(T,Id,Packet),
 			  server_handler(S,P,Id+1,J,T);
 		     _Catchall ->
 		     	  server_handler(S,P,Id,J,T)
@@ -166,9 +167,7 @@ connect(J,P) ->
 	case find_session(J) of
 	     [Record] ->
 	     	exmpp_session:stop(Session),
-		F = fun() -> mnesia:dirty_select(TableName,[{'_',[],['$_']}]) end,
-		{_,Messages} = mnesia:transaction(F),
-		{Record#sessions.pid,Record#sessions.session,Messages,TableName};
+		{Record#sessions.pid,Record#sessions.session,get_messages(TableName),TableName};
 	     [] ->
 	     	Pid = spawn(fun() -> server_handler(Session,[],0,FullJID,TableName) end),
 		% todo kill proc on error
@@ -190,3 +189,13 @@ find_session(J) ->
 insert_session(J,P,S) ->
 		 F = fun() -> mnesia:write(#sessions{jid=J,pid=P,session=S}) end,
 		 mnesia:transaction(F).
+get_messages(T) ->
+		try mnesia:dirty_select(T,[{'_',[],['$_']}]) of
+		    Messages ->
+		    	Messages
+		catch
+		    _ ->
+		      []
+		end.
+insert_message(T,I,P) ->
+		      catch mnesia:dirty_write(T,#messages{id=I,msg=P}).
