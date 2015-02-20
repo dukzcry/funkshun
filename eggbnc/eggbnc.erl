@@ -8,12 +8,13 @@
 -define(LISTEN_PORT,5222).
 -define(LIMIT_DOMAIN,<<"gero.in">>).
 server(J,P) ->
+	 %io:format("server con~n"),
 	 % snapshot ver of exmpp is required for gtalk conn
 	 S = exmpp_session:start({1,0}),
 	 exmpp_session:auth_info(S,J,P),
 	 [{Host, Port} | _] = exmpp_dns:get_c2s("gmail.com"),
 	 {ok,_,_} = exmpp_session:connect_TCP(S,Host,Port,[{starttls,enabled}]),
-	 {ok,_} = exmpp_session:login(S,"PLAIN"),
+	 {ok,_ServerJID} = exmpp_session:login(S,"PLAIN"),
 	 S.
  
 start() ->
@@ -31,7 +32,7 @@ accept(LS) ->
 	  	gen_tcp:controlling_process(Socket,Pid),
 		accept(LS);
 	       _Catchall ->
-	       erlang:sleep(60000),
+	       timer:sleep(60000),
 	       accept(LS)
 	  end.
 
@@ -71,7 +72,7 @@ client(S) ->
 	 		 	  R
 	 	    end,
 	 JID = exmpp_jid:make(binary_to_list(Login),binary_to_list(Domain),Resource),
-	 {RemoteHandler,RemoteSession,Messages,TableName} = connect(JID,binary_to_list(Password)),
+	 {RemoteHandler,RemoteSession,TableName} = connect(JID,binary_to_list(Password)),
 	 ok = send(S,exmpp_server_binding:bind(BindWorkaround,JID)),
 	 Session = getandparse(S,0),
 	 SessionWorkaround = Session#xmlel{ns = ?NS_JABBER_CLIENT},
@@ -79,7 +80,7 @@ client(S) ->
 	 ok = send(S,exmpp_server_session:establish(SessionWorkaround)),
 
 	 % todo put in better place
-	 case Messages of
+	 case get_messages(TableName) of
 	      [] -> true;
 	      M ->
 	      	%io:format("off msgs ~p~n", M),
@@ -125,37 +126,67 @@ client_handler(So,Se,P) ->
 	 	%io:format("server ~p~n", [Binary]),
 		gen_tcp:send(So,Binary),
 	 	client_handler(So,Se,P);
+	 stop ->
+	      exmpp_xml:stop_parser(P);
 	 _Catchall ->
-			client_handler(So,Se,P)
+	 	%io:format("client catchall ~p~n",[_Catchall]),
+		client_handler(So,Se,P)
 	 end.
 
 -record(messages,{id,msg}).
 
+reconnect(SL,J) ->
+		S = SL(),
+		{_,ok} = update_session(J,S),
+		monitor(process,S),
+		S.
 -include_lib("exmpp/include/exmpp_client.hrl").
-server_handler(S,P,Id,J,T) ->
+server_handler(P,Id,J,T,SL) ->
 	 receive
-	 stop ->
-	      %io:format("server discon~n"),
-	      exmpp_session:stop(S);
 	 Record = #received_packet{raw_packet=Packet} ->
 	 	case is_process_alive(P) of
 		     true ->
-		     	  %P ! exmpp_xml:set_attribute(Packet,<<"to">>,J),
+		     	  %P ! exmpp_xml:set_attribute(Packet,<<"to">>,FullJID),
 		     	  P ! Packet,
-			  server_handler(S,P,Id,J,T);
+			  server_handler(P,Id,J,T,SL);
+		     % comment when guard for off storing muc msgs and other stuff unsure if exmpp suports them though
 		     false when Record#received_packet.packet_type == message orelse
 		     	   	(Record#received_packet.packet_type == 'presence' andalso
 				 (Packet#received_packet.type_attr == "subscribe" orelse
 				  Packet#received_packet.type_attr == "subscribed")) ->
 			  insert_message(T,Id,Packet),
-			  server_handler(S,P,Id+1,J,T);
+			  server_handler(P,Id+1,J,T,SL);
 		     _Catchall ->
-		     	  server_handler(S,P,Id,J,T)
+		     	  server_handler(P,Id,J,T,SL)
 		end;
 	 P1 when is_pid(P1) ->
-	 	 server_handler(S,P1,0,J,T);
+	 	 server_handler(P1,0,J,T,SL);
+	 {'DOWN',_,_,_,_} ->
+	      case is_process_alive(P) of
+	      	     true ->
+		   	P ! stop;
+		     false ->
+		   	true
+	      end,
+	      update_session(J,'session-in-restart'),
+	      self() ! restart,
+	      server_handler(P,Id,J,T,SL);
+	 restart ->
+	      io:format("~p server recon~n", [J]),
+	      timer:sleep(30000),
+	      try reconnect(SL,J) of
+	      	  S ->
+		     io:format("~p session resurrected~n", [J]),
+		     bnc_status(S),
+	      	     server_handler(P,Id,J,T,SL)
+	      catch
+		  _Catchall ->
+		     self() ! restart,
+		     server_handler(P,Id,J,T,SL)
+	      end;
 	 _Catchall ->
-	 	server_handler(S,P,Id,J,T)
+	 	%io:format("server catchall ~p~n",[_Catchall]),
+	 	server_handler(P,Id,J,T,SL)
 	 end.
 
 -record(sessions,{jid,pid,session}).
@@ -163,19 +194,20 @@ server_handler(S,P,Id,J,T) ->
 connect(J,P) ->
 	FullJID = exmpp_jid:to_binary(J),
 	TableName = binary_to_atom(FullJID,latin1),
-	Session = server(J,P),
+	ServerLambda = fun() -> server(J,P) end,
+	Session = ServerLambda(),
 	case find_session(J) of
 	     [Record] ->
 	     	exmpp_session:stop(Session),
-		{Record#sessions.pid,Record#sessions.session,get_messages(TableName),TableName};
+		{Record#sessions.pid,Record#sessions.session,TableName};
 	     [] ->
-	     	Pid = spawn(fun() -> server_handler(Session,[],0,FullJID,TableName) end),
+	     	Pid = spawn(fun() -> monitor(process,Session), server_handler([],0,J,TableName,ServerLambda) end),
 		% todo kill proc on error
 		ok = exmpp_session:set_controlling_process(Session,Pid),
 	     	{_,ok} = insert_session(J,Pid,Session),
 		% table per jid for safe dirty ops
 		mnesia:create_table(TableName,[{record_name,messages},{attributes,record_info(fields,messages)}]),
-		{Pid,Session,[],[]}
+		{Pid,Session,TableName}
 	end.
 
 init_db() ->
@@ -189,6 +221,10 @@ find_session(J) ->
 insert_session(J,P,S) ->
 		 F = fun() -> mnesia:write(#sessions{jid=J,pid=P,session=S}) end,
 		 mnesia:transaction(F).
+update_session(J,S) ->
+		[MR] = find_session(J),
+		F = fun() -> mnesia:write(MR#sessions{session=S}) end,
+		mnesia:transaction(F).
 get_messages(T) ->
 		try mnesia:dirty_select(T,[{'_',[],['$_']}]) of
 		    Messages ->
