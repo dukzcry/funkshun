@@ -1,0 +1,23 @@
+Is a multi-user per resource XMPP (Jabber) bouncer
+###Howto
+Setup Erlang and snapshot of exmpp. Adjust bouncer config; if you're not for gtalk, roll your own server() function following exmpp guide
+
+Start with
+```
+erl -sname eggbnc -s eggbnc
+```
+Cleanup stale sessions and backup unreaded messages with cron-o-magic
+```
+0 5 * * * backup.sh eggbnc@myhost
+0 6 * * * cleanup.sh eggbnc@myhost 2678400
+```
+Manually kill sessions with
+```
+(eggbnc@myhost)1> eggbnc:kill(session).
+```
+where session is a base64 encoded full JID seen in mnesia:info()
+###Caveats and TODO
+- put it under supervisor. Need to be modified to follow OTP principles or supervisor bridge should be done prior
+- convert client session setup routine into the state machine, support more clients. Currently OS X Messages, Adium X, Psi, Miranda and QIP are tested
+- find another way to give roster presences on session recovering, current hack doesn't work for Pidgin
+- see notes in code regarding MUC etc

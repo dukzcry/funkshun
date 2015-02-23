@@ -2,7 +2,7 @@
 
 -author('A.V. Lukyanov <lomka@gero.in>').
 
--export([start/0,dump/0,cleanup/1]).
+-export([start/0,dump/0,cleanup/1,kill/1]).
 
 % user config
 -define(RECV_TIMEOUT,20000).
@@ -46,24 +46,24 @@ accept(LS) ->
 get_time() ->
 	   {_,Secs,_} = os:timestamp(),
 	   Secs.
+
 table_name(J) ->
 	Encoded = binary:replace(base64:encode(exmpp_jid:to_binary(J)),<<"/">>,<<"_">>,[global]),
 	binary_to_atom(Encoded,latin1).
-
 connect(J,P) ->
 	TableName = table_name(J),
-	ServerLambda = fun(J_) -> server(J_,P) end,
-	Session = ServerLambda(J),
-	case find_session(J) of
+	ServerLambda = fun() -> server(J,P) end,
+	Session = ServerLambda(),
+	case find_session(TableName) of
 	     [Record] ->
 	     	exmpp_session:stop(Session),
-		{_,ok} = update_seen(J,get_time()),
+		{_,ok} = update_seen(TableName,get_time()),
 		{Record#sessions.pid,Record#sessions.session,TableName};
 	     [] ->
-	     	Pid = spawn(fun() -> monitor(process,Session), server_handler([],0,J,TableName,ServerLambda) end),
+	     	Pid = spawn(fun() -> monitor(process,Session), server_handler([],0,TableName,ServerLambda) end),
 		% todo kill proc on error
 		ok = exmpp_session:set_controlling_process(Session,Pid),
-	     	{_,ok} = insert_session(J,Pid,Session,get_time()),
+	     	{_,ok} = insert_session(TableName,Pid,Session,get_time()),
 		% eating atoms space - table per jid for safe dirty ops
 		mnesia:create_table(TableName,[{record_name,messages},{attributes,record_info(fields,messages)}]),
 		{Pid,Session,TableName}
@@ -167,32 +167,32 @@ client_handler(So,Se,P) ->
 		client_handler(So,Se,P)
 	 end.
 
-reconnect(SL,J) ->
-		S = SL(J),
-		{_,ok} = update_session(J,S),
+reconnect(SL,T) ->
+		S = SL(),
+		{_,ok} = update_session(T,S),
 		monitor(process,S),
 		S.
 -include_lib("exmpp/include/exmpp_client.hrl").
-server_handler(P,Id,J,T,SL) ->
+server_handler(P,Id,T,SL) ->
 	 receive
 	 Record = #received_packet{raw_packet=Packet} ->
 	 	case is_process_alive(P) of
 		     true ->
 		     	  %P ! exmpp_xml:set_attribute(Packet,<<"to">>,FullJID),
 		     	  P ! Packet,
-			  server_handler(P,Id,J,T,SL);
+			  server_handler(P,Id,T,SL);
 		     % comment when guard for off storing muc msgs and other stuff unsure if exmpp suports them though
 		     false when Record#received_packet.packet_type == message orelse
 		     	   	(Record#received_packet.packet_type == 'presence' andalso
 				 (Packet#received_packet.type_attr == "subscribe" orelse
 				  Packet#received_packet.type_attr == "subscribed")) ->
 			  insert_message(T,Id,Packet),
-			  server_handler(P,Id+1,J,T,SL);
+			  server_handler(P,Id+1,T,SL);
 		     _Catchall ->
-		     	  server_handler(P,Id,J,T,SL)
+		     	  server_handler(P,Id,T,SL)
 		end;
 	 P1 when is_pid(P1) ->
-	 	 server_handler(P1,0,J,T,SL);
+	 	 server_handler(P1,0,T,SL);
 	 {'DOWN',_,_,_,_} ->
 	      case is_process_alive(P) of
 	      	     true ->
@@ -200,27 +200,27 @@ server_handler(P,Id,J,T,SL) ->
 		     false ->
 		   	true
 	      end,
-	      update_session(J,'session-in-restart'),
+	      update_session(T,'session-in-restart'),
 	      self() ! restart,
-	      server_handler(P,Id,J,T,SL);
+	      server_handler(P,Id,T,SL);
 	 restart ->
-	      io:format("~p server recon~n", [J]),
+	      io:format("~p server recon~n", [T]),
 	      timer:sleep(?RECONNECT_TIME),
-	      try reconnect(SL,J) of
+	      try reconnect(SL,T) of
 	      	  S ->
-		     io:format("~p session resurrected~n", [J]),
+		     io:format("~p session resurrected~n", [T]),
 		     bnc_status(S),
-	      	     server_handler(P,Id,J,T,SL)
+	      	     server_handler(P,Id,T,SL)
 	      catch
 		  _Catchall ->
 		     self() ! restart,
-		     server_handler(P,Id,J,T,SL)
+		     server_handler(P,Id,T,SL)
 	      end;
 	 stop ->
 	      true;
 	 _Catchall ->
 	 	%io:format("server catchall ~p~n",[_Catchall]),
-	 	server_handler(P,Id,J,T,SL)
+	 	server_handler(P,Id,T,SL)
 	 end.
 
 init_db() ->
@@ -242,9 +242,12 @@ update_session(J,S) ->
 		[MR] = find_session(J),
 		F = fun() -> mnesia:write(MR#sessions{session=S}) end,
 		mnesia:transaction(F).
-delete_session(MR) ->
+kill_session(MR) ->
+		MR#sessions.pid ! stop,
+		exmpp_session:stop(MR#sessions.session),
 		F = fun() -> mnesia:delete_object(MR) end,
-		mnesia:transaction(F).
+		mnesia:transaction(F),
+		mnesia:clear_table(MR#sessions.jid).
 update_seen(J,T) ->
 		[MR] = find_session(J),
 		F = fun() -> mnesia:write(MR#sessions{seen=T}) end,
@@ -268,9 +271,8 @@ cleanup(T) ->
 	 Time = get_time() - T,
 	 Tables = find_seen(Time),
 	 io:format("clearing ~p~n",[Tables]),
-	 lists:foreach(fun(M) ->
-	 		M#sessions.pid ! stop,
-			exmpp_session:stop(M#sessions.session),
-			delete_session(M),
-			mnesia:clear_table(table_name(M#sessions.jid))
-	 		end,Tables).
+	 lists:foreach(fun(X) -> kill_session(X) end,Tables).
+
+kill(J) ->
+	[MR] = find_session(J),
+	kill_session(MR).
