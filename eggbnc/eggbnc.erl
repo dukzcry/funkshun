@@ -44,7 +44,7 @@ accept(LS) ->
 	  end.
 
 -record(sessions,{jid,pid,session,seen}).
--record(messages,{id,msg}).
+-record(messages,{id,stamp,msg}).
 
 get_time() ->
 	   {_,Secs,_} = os:timestamp(),
@@ -86,6 +86,16 @@ getandparse(S,D) ->
 send(S,D) ->
 	  gen_tcp:send(S,exmpp_stream:to_binary(D)).
 -include_lib("exmpp/include/exmpp.hrl").
+add_delayed(TS,#xmlel{ns = NS} = Message) ->
+	  case exmpp_xml:get_element(Message, NS, 'delay') of
+	       undefined ->
+  	       		 {{Year,Month,Day},{Hour,Minute,Second}} = calendar:now_to_universal_time(TS),
+	  		 Stamp = io_lib:format("~4..0w-~2..0w-~2..0wT~2..0w:~2..0w:~2..0wZ",[Year,Month,Day,Hour,Minute,Second]),
+	  		 Delayed = exmpp_xml:set_cdata(#xmlel{ns=?NS_DELAY,name='delay',attrs=[exmpp_xml:attribute(<<"stamp">>,Stamp)]},<<>>),
+	  		 exmpp_xml:append_child(Message,Delayed);
+	       _ ->
+			 Message
+	  end.
 client(S) ->
 	 Opening = getandparse(S,1),
 	 Domain = exmpp_stream:get_receiving_entity(Opening),
@@ -119,7 +129,7 @@ client(S) ->
 	      [] -> true;
 	      M ->
 	      	%io:format("off msgs ~p~n", M),
-	      	lists:foreach(fun({_,_,Message}) -> send(S,Message) end,lists:sort(M)),
+	      	lists:foreach(fun({_,_,TS,Message}) -> send(S,add_delayed(TS,Message)) end,lists:sort(M)),
 		mnesia:clear_table(TableName), mnesia:dump_tables([TableName])
 	 end,
 
@@ -262,7 +272,7 @@ get_messages(T) ->
 		      []
 		end.
 insert_message(T,I,P) ->
-		      catch mnesia:dirty_write(T,#messages{id=I,msg=P}).
+		      catch mnesia:dirty_write(T,#messages{id=I,stamp=os:timestamp(),msg=P}).
 
 dump() ->
 	 Tables = lists:filter(fun(X) -> X /= schema andalso X /= sessions end,mnesia:system_info(tables)),
