@@ -27,9 +27,9 @@ start() ->
 	listen().
 
 listen() ->
-	 {ok,Socket} = gen_tcp:listen(?LISTEN_PORT,[binary,{packet,0},{active,false},{reuseaddr,true},
+	 {ok,Socket} = gen_tcp:listen(?LISTEN_PORT,[binary,{packet,0},{active,false},{reuseaddr,true}
 	 % comment to allow listening on all addresses
-	 {ip,?LISTEN_ADDR}
+	 ,{ip,?LISTEN_ADDR}
 	 ]),
 	 accept(Socket).
 accept(LS) ->
@@ -193,10 +193,18 @@ server_handler(P,Id,T,SL,R) ->
 		     	  P ! Packet,
 			  server_handler(P,Id,T,SL,R);
 		     % comment when guard for off storing of other types of stanza
-		     false when Record#received_packet.packet_type == message orelse
-		     	   	(Record#received_packet.packet_type == 'presence' andalso
-				 (Packet#received_packet.type_attr == "subscribe" orelse
-				  Packet#received_packet.type_attr == "subscribed")) ->
+		     false when Record#received_packet.packet_type == message andalso
+		     	   	 Record#received_packet.type_attr =/= "error" ->
+			  case exmpp_message:get_body(Packet) of
+			       undefined ->
+			       		server_handler(P,Id,T,SL,R);
+			       _ ->
+					insert_message(T,Id,Packet),
+					server_handler(P,Id+1,T,SL,R)
+			  end;
+		     false when	Record#received_packet.packet_type == 'presence' andalso
+				 (Record#received_packet.type_attr == "subscribe" orelse
+				  Record#received_packet.type_attr == "subscribed") ->
 			  insert_message(T,Id,Packet),
 			  server_handler(P,Id+1,T,SL,R);
 		     _Catchall ->
