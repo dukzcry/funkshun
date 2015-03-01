@@ -9,7 +9,7 @@
 -define(RECONNECT_TIME,30000).
 -define(LISTEN_ADDR,{127,0,0,1}).
 -define(LISTEN_PORT,5222).
--define(LIMIT_DOMAIN,<<"gero.in">>).
+-define(LIMIT_DOMAIN,<<"example.com">>).
 server(J,P) ->
 	 %io:format("server con~n"),
 	 % snapshot ver of exmpp is required for gtalk conn
@@ -27,7 +27,10 @@ start() ->
 	listen().
 
 listen() ->
-	 {ok,Socket} = gen_tcp:listen(?LISTEN_PORT,[binary,{packet,0},{active,false},{reuseaddr,true},{ip,?LISTEN_ADDR}]),
+	 {ok,Socket} = gen_tcp:listen(?LISTEN_PORT,[binary,{packet,0},{active,false},{reuseaddr,true},
+	 % comment to allow listening on all addresses
+	 {ip,?LISTEN_ADDR}
+	 ]),
 	 accept(Socket).
 accept(LS) ->
 	  case gen_tcp:accept(LS) of
@@ -60,7 +63,7 @@ connect(J,P) ->
 		{_,ok} = update_seen(TableName,get_time()),
 		{Record#sessions.pid,Record#sessions.session,TableName};
 	     [] ->
-	     	Pid = spawn(fun() -> monitor(process,Session), server_handler([],0,TableName,ServerLambda) end),
+	     	Pid = spawn(fun() -> monitor(process,Session), server_handler([],0,TableName,ServerLambda,?RECONNECT_TIME) end),
 		% todo kill proc on error
 		ok = exmpp_session:set_controlling_process(Session,Pid),
 	     	{_,ok} = insert_session(TableName,Pid,Session,get_time()),
@@ -112,7 +115,6 @@ client(S) ->
 	 % psi wants to set session even if we don't advert this feature
 	 ok = send(S,exmpp_server_session:establish(SessionWorkaround)),
 
-	 % todo put in better place
 	 case get_messages(TableName) of
 	      [] -> true;
 	      M ->
@@ -138,7 +140,6 @@ client_handler(So,Se,P) ->
 	 receive
 	 {tcp,So,Data} ->
 	 	      %io:format("client ~p~n", [Data]),
-		      % todo send it raw instead
 		      case exmpp_xml:parse(P,Data) of
 		      	   continue ->
 			   	    true;
@@ -173,26 +174,26 @@ reconnect(SL,T) ->
 		monitor(process,S),
 		S.
 -include_lib("exmpp/include/exmpp_client.hrl").
-server_handler(P,Id,T,SL) ->
+server_handler(P,Id,T,SL,R) ->
 	 receive
 	 Record = #received_packet{raw_packet=Packet} ->
 	 	case is_process_alive(P) of
 		     true ->
 		     	  %P ! exmpp_xml:set_attribute(Packet,<<"to">>,FullJID),
 		     	  P ! Packet,
-			  server_handler(P,Id,T,SL);
-		     % comment when guard for off storing muc msgs and other stuff unsure if exmpp suports them though
+			  server_handler(P,Id,T,SL,R);
+		     % comment when guard for off storing of other types of stanza
 		     false when Record#received_packet.packet_type == message orelse
 		     	   	(Record#received_packet.packet_type == 'presence' andalso
 				 (Packet#received_packet.type_attr == "subscribe" orelse
 				  Packet#received_packet.type_attr == "subscribed")) ->
 			  insert_message(T,Id,Packet),
-			  server_handler(P,Id+1,T,SL);
+			  server_handler(P,Id+1,T,SL,R);
 		     _Catchall ->
-		     	  server_handler(P,Id,T,SL)
+		     	  server_handler(P,Id,T,SL,R)
 		end;
 	 P1 when is_pid(P1) ->
-	 	 server_handler(P1,0,T,SL);
+	 	 server_handler(P1,0,T,SL,R);
 	 {'DOWN',_,_,_,_} ->
 	      case is_process_alive(P) of
 	      	     true ->
@@ -202,25 +203,25 @@ server_handler(P,Id,T,SL) ->
 	      end,
 	      update_session(T,'session-in-restart'),
 	      self() ! restart,
-	      server_handler(P,Id,T,SL);
+	      server_handler(P,Id,T,SL,R);
 	 restart ->
 	      io:format("~p server recon~n", [T]),
-	      timer:sleep(?RECONNECT_TIME),
+	      timer:sleep(R),
 	      try reconnect(SL,T) of
 	      	  S ->
 		     io:format("~p session resurrected~n", [T]),
 		     bnc_status(S),
-	      	     server_handler(P,Id,T,SL)
+	      	     server_handler(P,Id,T,SL,?RECONNECT_TIME)
 	      catch
 		  _Catchall ->
 		     self() ! restart,
-		     server_handler(P,Id,T,SL)
+		     server_handler(P,Id,T,SL,R*2)
 	      end;
 	 stop ->
 	      true;
 	 _Catchall ->
 	 	%io:format("server catchall ~p~n",[_Catchall]),
-	 	server_handler(P,Id,T,SL)
+	 	server_handler(P,Id,T,SL,R)
 	 end.
 
 init_db() ->
