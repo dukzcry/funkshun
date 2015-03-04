@@ -21,4 +21,4 @@ Note that there is no SSL/TLS implemented, so SSL tunnel is on your behalf
 ###Caveats and TODO
 - put it under supervisor. Need to be modified to follow OTP principles or supervisor bridge should be done prior
 - convert client session setup routine into the state machine, support more clients. We have tested OS X Messages, Adium X, Psi and QIP so far
-- MUC offline support
+- for priority ~~and MUC~~ offline support see v2 folder
