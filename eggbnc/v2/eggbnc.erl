@@ -110,6 +110,7 @@ client(S) ->
 	 ok = send(S,exmpp_stream:opening_reply(getandparse(S,1),random)),
 	 ok = send(S,exmpp_stream:features([exmpp_server_binding:feature(),exmpp_server_session:feature()])),
 	 Bind = getandparse(S,0),
+	 % for clients like os x messages
 	 BindWorkaround = Bind#xmlel{ns = ?NS_JABBER_CLIENT},
 	 Resource = case exmpp_server_binding:wished_resource(BindWorkaround) of
 	 	    	 undefined ->
@@ -146,7 +147,7 @@ bnc_status_(T) ->
 bnc_status(S,P) ->
 	   exmpp_session:send_packet(S,exmpp_presence:set_priority(bnc_status_(exmpp_presence:available()),P)).
 
-handle_packet(#xmlel{ns = NS} = Presence,T) when ?IS_PRESENCE(Presence) ->
+handle_packet(#xmlel{ns = NS} = Presence,T) when Presence#xmlel.name == 'presence' ->
     case exmpp_xml:get_element(Presence, NS, 'priority') of
         undefined ->
             Presence;
