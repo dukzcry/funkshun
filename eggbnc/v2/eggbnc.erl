@@ -87,7 +87,7 @@ send(S,D) ->
 	  gen_tcp:send(S,exmpp_stream:to_binary(D)).
 -include_lib("exmpp/include/exmpp.hrl").
 add_delayed(TS,#xmlel{ns = NS} = Message) ->
-	  case exmpp_xml:get_element(Message, NS, 'delay') of
+	  case exmpp_xml:get_element(Message,NS,'delay') of
 	       undefined ->
   	       		 {{Year,Month,Day},{Hour,Minute,Second}} = calendar:now_to_universal_time(TS),
 	  		 Stamp = io_lib:format("~4..0w-~2..0w-~2..0wT~2..0w:~2..0w:~2..0wZ",[Year,Month,Day,Hour,Minute,Second]),
@@ -148,7 +148,9 @@ bnc_status(S,P) ->
 	   exmpp_session:send_packet(S,exmpp_presence:set_priority(bnc_status_(exmpp_presence:available()),P)).
 
 handle_packet(#xmlel{ns = NS} = Presence,T) when Presence#xmlel.name == 'presence' ->
-    case exmpp_xml:get_element(Presence, NS, 'priority') of
+    case exmpp_xml:get_attribute(Presence,<<"to">>,[]) of
+    [] ->
+    case exmpp_xml:get_element(Presence,NS,'priority') of
         undefined ->
             Presence;
         Priority_El ->
@@ -160,6 +162,9 @@ handle_packet(#xmlel{ns = NS} = Presence,T) when Presence#xmlel.name == 'presenc
 	    update_priority(T,F()),
 	    self() ! F(),
 	    Presence
+    end;
+    _ ->
+      Presence
     end;
 handle_packet(Packet,_) ->
 	Packet.
