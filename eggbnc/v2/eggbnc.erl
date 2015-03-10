@@ -43,7 +43,7 @@ accept(LS) ->
 	       accept(LS)
 	  end.
 
--record(sessions,{jid,pid,session,seen,prio}).
+-record(sessions,{jid,pid,seen,session}).
 -record(messages,{id,stamp,msg}).
 
 get_time() ->
@@ -63,10 +63,10 @@ connect(J,P) ->
 		{_,ok} = update_seen(TableName,get_time()),
 		{Record#sessions.pid,Record#sessions.session,TableName};
 	     [] ->
-	     	Pid = spawn(fun() -> monitor(process,Session), server_handler([],0,TableName,ServerLambda,?RECONNECT_TIME) end),
+	     	Pid = spawn(fun() -> monitor(process,Session), server_handler([],0,TableName,ServerLambda,Session,?RECONNECT_TIME,0) end),
 		% todo kill proc on error
 		ok = exmpp_session:set_controlling_process(Session,Pid),
-	     	{_,ok} = insert_session(TableName,Pid,Session,get_time(),0),
+	     	{_,ok} = insert_session(TableName,Pid,Session,get_time()),
 		% eating atoms space - table per jid for safe dirty ops
 		mnesia:create_table(TableName,[{record_name,messages},{attributes,record_info(fields,messages)}]),
 		{Pid,Session,TableName}
@@ -91,7 +91,7 @@ add_delayed(TS,#xmlel{ns = NS} = Message) ->
 	       undefined ->
   	       		 {{Year,Month,Day},{Hour,Minute,Second}} = calendar:now_to_universal_time(TS),
 	  		 Stamp = io_lib:format("~4..0w-~2..0w-~2..0wT~2..0w:~2..0w:~2..0wZ",[Year,Month,Day,Hour,Minute,Second]),
-	  		 Delayed = exmpp_xml:set_cdata(#xmlel{ns=?NS_DELAY,name='delay',attrs=[exmpp_xml:attribute(<<"stamp">>,Stamp)]},<<>>),
+	  		 Delayed = #xmlel{ns=?NS_DELAY,name='delay',attrs=[exmpp_xml:attribute(<<"stamp">>,Stamp)]},
 	  		 exmpp_xml:append_child(Message,Delayed);
 	       _ ->
 			 Message
@@ -140,36 +140,38 @@ client(S) ->
 	 RemoteHandler ! self(),
 	 % quickly set off to be notified of roster people presences
 	 exmpp_session:send_packet(RemoteSession,exmpp_presence:set_status(exmpp_presence:unavailable(),"")),
-	 client_handler(S,RemoteSession,P,TableName,0).
+	 client_handler(S,RemoteSession,RemoteHandler,P,0).
 
-bnc_status_(T) ->
-		exmpp_presence:set_status(exmpp_presence:set_show(T,'xa'),"eggbouncer").
+bnc_status_(T,P) ->
+		exmpp_presence:set_priority(exmpp_presence:set_status(exmpp_presence:set_show(T,'xa'),"eggbouncer"),P).
 bnc_status(S,P) ->
-	   exmpp_session:send_packet(S,exmpp_presence:set_priority(bnc_status_(exmpp_presence:available()),P)).
+	   exmpp_session:send_packet(S,bnc_status_(exmpp_presence:available(),P)).
 
-handle_packet(#xmlel{ns = NS} = Presence,T) when Presence#xmlel.name == 'presence' ->
-    case exmpp_xml:get_attribute(Presence,<<"to">>,[]) of
-    [] ->
+handle_packet(#xmlel{ns = NS} = Presence,Pr) when Presence#xmlel.name == 'presence' ->
     case exmpp_xml:get_element(Presence,NS,'priority') of
         undefined ->
-            Presence;
+	    case exmpp_presence:get_type(Presence) of
+	    	 unavailable ->
+		 	   bnc_status_(exmpp_presence:set_type(Presence,available),Pr);
+	    	 _ ->
+		 	   Presence
+      	      end;
         Priority_El ->
-            F = fun() -> case exmpp_xml:get_cdata_as_list(Priority_El) of
+	    case exmpp_xml:get_attribute(Presence,<<"to">>,[]) of
+    	    [] ->
+		self() ! case exmpp_xml:get_cdata_as_list(Priority_El) of
                 "" -> 0;
                 P  -> list_to_integer(P)
-            end
+            	end;
+	    _ ->
+      	        true
 	    end,
-	    update_priority(T,F()),
-	    self() ! F(),
 	    Presence
-    end;
-    _ ->
-      Presence
     end;
 handle_packet(Packet,_) ->
 	Packet.
 % todo catch pings, stream ends, spoof from/to for server changed resources
-client_handler(So,Se,P,T,Pr) ->
+client_handler(So,Se,Pid,P,Pr) ->
 	 inet:setopts(So,[{active,once}]),
 	 receive
 	 {tcp,So,Data} ->
@@ -179,29 +181,30 @@ client_handler(So,Se,P,T,Pr) ->
 		    	   E ->
 			     Elements = exmpp_xml:remove_whitespaces_from_list(E),
 			     %io:format("client ~p~n", [Data]),
-			     lists:foreach(fun(X) -> exmpp_session:send_packet(Se,handle_packet(X,T)) end,Elements)
+			     lists:foreach(fun(X) -> exmpp_session:send_packet(Se,handle_packet(X,Pr)) end,Elements)
 		      end,
-		      client_handler(So,Se,P,T,Pr);
+		      client_handler(So,Se,Pid,P,Pr);
 	 {tcp_closed,So} ->
 	 		%io:format("client ~p discon~n", [So]),
-			exmpp_xml:stop_parser(P),
-			bnc_status(Se,Pr);
+			exmpp_xml:stop_parser(P);
+			%bnc_status(Se,Pr);
 	 {tcp_error,So,_Reason} ->
 	 		%io:format("error client ~p sock ~p~n", [So,Reason]),
-			exmpp_xml:stop_parser(P),
-			bnc_status(Se,Pr);
+			exmpp_xml:stop_parser(P);
+			%bnc_status(Se,Pr);
 	 Packet = #xmlel{} ->
 	 	Binary = exmpp_stream:to_binary(Packet),
 	 	%io:format("server ~p~n", [Binary]),
 		gen_tcp:send(So,Binary),
-	 	client_handler(So,Se,P,T,Pr);
+	 	client_handler(So,Se,Pid,P,Pr);
 	 NewPriority when is_integer(NewPriority) ->
-	 	client_handler(So,Se,P,T,NewPriority);
+	 	Pid ! NewPriority,
+	 	client_handler(So,Se,Pid,P,NewPriority);
 	 stop ->
 	      exmpp_xml:stop_parser(P);
 	 _Catchall ->
 	 	%io:format("client catchall ~p~n",[_Catchall]),
-		client_handler(So,Se,P,T,Pr)
+		client_handler(So,Se,Pid,P,Pr)
 	 end.
 
 reconnect(SL,T) ->
@@ -210,35 +213,49 @@ reconnect(SL,T) ->
 		monitor(process,S),
 		S.
 -include_lib("exmpp/include/exmpp_client.hrl").
-server_handler(P,Id,T,SL,R) ->
+server_handler(P,Id,T,SL,S,R,Pr) ->
 	 receive
 	 Record = #received_packet{raw_packet=Packet} ->
 	 	case is_process_alive(P) of
 		     true ->
 		     	  %P ! exmpp_xml:set_attribute(Packet,<<"to">>,FullJID),
 		     	  P ! Packet,
-			  server_handler(P,Id,T,SL,R);
+			  server_handler(P,Id,T,SL,S,R,Pr);
 		     % comment when guard for off storing of other types of stanza
 		     false when Record#received_packet.packet_type == message andalso
 		     	   	 Record#received_packet.type_attr =/= "error" ->
 			  case exmpp_message:get_body(Packet) of
 			       undefined ->
-			       		server_handler(P,Id,T,SL,R);
+			       		server_handler(P,Id,T,SL,S,R,Pr);
 			       _ ->
 					insert_message(T,Id,Packet),
-					server_handler(P,Id+1,T,SL,R)
+					server_handler(P,Id+1,T,SL,S,R,Pr)
 			  end;
 		     false when	Record#received_packet.packet_type == 'presence' andalso
 				 (Record#received_packet.type_attr == "subscribe" orelse
 				  Record#received_packet.type_attr == "subscribed") ->
 			  insert_message(T,Id,Packet),
-			  server_handler(P,Id+1,T,SL,R);
+			  server_handler(P,Id+1,T,SL,S,R,Pr);
+		     false when Record#received_packet.packet_type == 'presence' andalso
+		     	   Record#received_packet.type_attr == "unavailable" ->
+				case exmpp_xml:get_attribute(exmpp_xml:get_element(exmpp_xml:get_element(Packet,'x'),'status'),<<"code">>,[]) of
+				     % kicked
+				     <<"307">> ->
+					       From = exmpp_xml:get_attribute(Packet,<<"from">>,[]),
+					       % todo speak muc not groupchat
+					       Rejoin = bnc_status_(#xmlel{ns=?NS_JABBER_CLIENT,name='presence',
+						attrs=[exmpp_xml:attribute(<<"to">>,From)]},Pr),
+					       exmpp_session:send_packet(S,Rejoin);
+				     _ ->
+				       true
+				end,
+				server_handler(P,Id,T,SL,S,R,Pr);
 		     _Catchall ->
 		     	  %io:format("server packet catch all ~p~n",[Record]),
-		     	  server_handler(P,Id,T,SL,R)
+		     	  server_handler(P,Id,T,SL,S,R,Pr)
 		end;
 	 P1 when is_pid(P1) ->
-	 	 server_handler(P1,0,T,SL,R);
+	 	 server_handler(P1,0,T,SL,S,R,Pr);
 	 {'DOWN',_,_,_,_} ->
 	      case is_process_alive(P) of
 	      	     true ->
@@ -248,27 +265,28 @@ server_handler(P,Id,T,SL,R) ->
 	      end,
 	      update_session(T,'session-in-restart'),
 	      self() ! restart,
-	      server_handler(P,Id,T,SL,R);
+	      server_handler(P,Id,T,SL,S,R,Pr);
 	 restart ->
 	      io:format("~p server recon~n", [T]),
 	      timer:sleep(R),
 	      try reconnect(SL,T) of
-	      	  S ->
+	      	  NewS ->
 		     io:format("~p session resurrected~n", [T]),
-		     [Session] = find_session(T),
-		     bnc_status(S,Session#sessions.prio),
-	      	     server_handler(P,Id,T,SL,?RECONNECT_TIME)
-	      % todo kill this overcare
+		     bnc_status(S,Pr),
+	      	     server_handler(P,Id,T,SL,NewS,?RECONNECT_TIME,Pr)
+	      % probably too much
 	      catch
 		  _Catchall ->
 		     self() ! restart,
-		     server_handler(P,Id,T,SL,R*2)
+		     server_handler(P,Id,T,SL,S,R*2,Pr)
 	      end;
+	 NewPriority when is_integer(NewPriority) ->
+	 	     server_handler(P,Id,T,SL,S,R,NewPriority);
 	 stop ->
 	      true;
 	 _Catchall ->
 	 	%io:format("server catchall ~p~n",[_Catchall]),
-	 	server_handler(P,Id,T,SL,R)
+	 	server_handler(P,Id,T,SL,S,R,Pr)
 	 end.
 
 init_db() ->
@@ -279,12 +297,8 @@ find_session(J) ->
 		  F = fun() -> mnesia:match_object(#sessions{jid=J,_='_'}) end,
 		  {atomic,MR} = mnesia:transaction(F),
 		  MR.
-find_seen(T) ->
-		  F = fun() -> mnesia:select(sessions,[{#sessions{seen='$1',_='_'},[{'<','$1',T}],['$_']}]) end,
-		  {atomic,MR} = mnesia:transaction(F),
-		  MR.
-insert_session(J,P,S,T,Pr) ->
-		 F = fun() -> mnesia:write(#sessions{jid=J,pid=P,session=S,seen=T,prio=Pr}) end,
+insert_session(J,P,S,T) ->
+		 F = fun() -> mnesia:write(#sessions{jid=J,pid=P,session=S,seen=T}) end,
 		 mnesia:transaction(F).
 update_session(J,S) ->
 		[MR] = find_session(J),
@@ -296,13 +310,13 @@ kill_session(MR) ->
 		F = fun() -> mnesia:delete_object(MR) end,
 		mnesia:transaction(F),
 		mnesia:clear_table(MR#sessions.jid).
+find_seen(T) ->
+		  F = fun() -> mnesia:select(sessions,[{#sessions{seen='$1',_='_'},[{'<','$1',T}],['$_']}]) end,
+		  {atomic,MR} = mnesia:transaction(F),
+		  MR.
 update_seen(J,T) ->
 		[MR] = find_session(J),
 		F = fun() -> mnesia:write(MR#sessions{seen=T}) end,
-		mnesia:transaction(F).
-update_priority(J,P) ->
-		[MR] = find_session(J),
-		F = fun() -> mnesia:write(MR#sessions{prio=P}) end,
 		mnesia:transaction(F).
 get_messages(T) ->
 		try mnesia:dirty_select(T,[{'_',[],['$_']}]) of

@@ -43,7 +43,7 @@ accept(LS) ->
 	       accept(LS)
 	  end.
 
--record(sessions,{jid,pid,session,seen}).
+-record(sessions,{jid,pid,seen,session}).
 -record(messages,{id,stamp,msg}).
 
 get_time() ->
@@ -91,7 +91,7 @@ add_delayed(TS,#xmlel{ns = NS} = Message) ->
 	       undefined ->
   	       		 {{Year,Month,Day},{Hour,Minute,Second}} = calendar:now_to_universal_time(TS),
 	  		 Stamp = io_lib:format("~4..0w-~2..0w-~2..0wT~2..0w:~2..0w:~2..0wZ",[Year,Month,Day,Hour,Minute,Second]),
-	  		 Delayed = exmpp_xml:set_cdata(#xmlel{ns=?NS_DELAY,name='delay',attrs=[exmpp_xml:attribute(<<"stamp">>,Stamp)]},<<>>),
+	  		 Delayed = #xmlel{ns=?NS_DELAY,name='delay',attrs=[exmpp_xml:attribute(<<"stamp">>,Stamp)]},
 	  		 exmpp_xml:append_child(Message,Delayed);
 	       _ ->
 			 Message
@@ -230,6 +230,7 @@ server_handler(P,Id,T,SL,R) ->
 		     io:format("~p session resurrected~n", [T]),
 		     bnc_status(S),
 	      	     server_handler(P,Id,T,SL,?RECONNECT_TIME)
+	      % probably too much
 	      catch
 		  _Catchall ->
 		     self() ! restart,
@@ -250,10 +251,6 @@ find_session(J) ->
 		  F = fun() -> mnesia:match_object(#sessions{jid=J,_='_'}) end,
 		  {atomic,MR} = mnesia:transaction(F),
 		  MR.
-find_seen(T) ->
-		  F = fun() -> mnesia:select(sessions,[{#sessions{seen='$1',_='_'},[{'<','$1',T}],['$_']}]) end,
-		  {atomic,MR} = mnesia:transaction(F),
-		  MR.
 insert_session(J,P,S,T) ->
 		 F = fun() -> mnesia:write(#sessions{jid=J,pid=P,session=S,seen=T}) end,
 		 mnesia:transaction(F).
@@ -267,6 +264,10 @@ kill_session(MR) ->
 		F = fun() -> mnesia:delete_object(MR) end,
 		mnesia:transaction(F),
 		mnesia:clear_table(MR#sessions.jid).
+find_seen(T) ->
+		  F = fun() -> mnesia:select(sessions,[{#sessions{seen='$1',_='_'},[{'<','$1',T}],['$_']}]) end,
+		  {atomic,MR} = mnesia:transaction(F),
+		  MR.
 update_seen(J,T) ->
 		[MR] = find_session(J),
 		F = fun() -> mnesia:write(MR#sessions{seen=T}) end,
