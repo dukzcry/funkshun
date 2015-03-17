@@ -2,7 +2,7 @@
 
 -author('A.V. Lukyanov <lomka@gero.in>').
 
--export([start/0,dump/0,cleanup/1,kill/1]).
+-export([start/0,dump/0,cleanup/1,left/1,kill/1]).
 
 % user config
 -define(RECV_TIMEOUT,20000).
@@ -342,8 +342,6 @@ get_messages(T) ->
 		end.
 insert_message(T,I,P) ->
 		      catch mnesia:dirty_write(T,#messages{id=I,stamp=os:timestamp(),msg=P}).
-insert_room(T,R) ->
-		      catch mnesia:dirty_write(T,#rooms{room=R}).
 get_rooms(T) ->
 		try mnesia:dirty_select(T,[{'_',[],['$_']}]) of
 		    Rooms ->
@@ -352,16 +350,32 @@ get_rooms(T) ->
 		    _ ->
 		      []
 		end.
+insert_room(T,R) ->
+		      catch mnesia:dirty_write(T,#rooms{room=R}).
+left_rooms(MR) ->
+	      RoomTable = binary_to_atom(room_table(atom_to_binary(MR#sessions.jid,latin1)),latin1),
+	      case get_rooms(RoomTable) of
+	      [] ->
+	      	 false;
+	      Rooms ->
+	      	 Packet = exmpp_presence:unavailable(),
+	      	 lists:foreach(fun({_,To,_}) -> exmpp_session:send_packet(MR#sessions.session,
+		 		      exmpp_xml:set_attribute(Packet,<<"to">>,To)) end,Rooms),
+		 mnesia:clear_table(RoomTable)
+	      end.
 
 dump() ->
 	 Tables = lists:filter(fun(X) -> X /= schema andalso X /= sessions end,mnesia:system_info(tables)),
 	 io:format("dumping ~p~n",[Tables]),
 	 mnesia:dump_tables(Tables).
+cleanup_(T,F) ->
+	 Tables = find_seen(get_time() - T),
+	 %io:format("clearing ~p~n",[Tables]),
+	 lists:foreach(F,Tables).
 cleanup(T) ->
-	 Time = get_time() - T,
-	 Tables = find_seen(Time),
-	 io:format("clearing ~p~n",[Tables]),
-	 lists:foreach(fun(X) -> kill_session(X) end,Tables).
+	 cleanup_(T,fun(X) -> kill_session(X) end).
+left(T) ->
+	 cleanup_(T,fun(X) -> left_rooms(X) end).
 
 kill(J) ->
 	[MR] = find_session(J),
