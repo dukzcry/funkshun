@@ -2,7 +2,7 @@
 
 -author('A.V. Lukyanov <lomka@gero.in>').
 
--export([start/0,dump/0,cleanup/1,left/1,kill/1]).
+-export([start/0,dump/0,cleanup/1,leave/1,kill/1,leave_rooms/1,get_all/1]).
 
 % user config
 -define(RECV_TIMEOUT,20000).
@@ -45,7 +45,7 @@ accept(LS) ->
 
 -record(sessions,{jid,pid,seen,session}).
 -record(messages,{id,stamp,msg}).
--record(rooms,{room,nobadarg}).
+-record(rooms,{room,seen}).
 
 get_time() ->
 	   {_,Secs,_} = os:timestamp(),
@@ -131,7 +131,7 @@ client(S) ->
 	 % psi wants to set session even if we don't advert this feature
 	 ok = send(S,exmpp_server_session:establish(SessionWorkaround)),
 
-	 case get_messages(TableName) of
+	 case get_all_(TableName) of
 	      [] -> true;
 	      M ->
 	      	%io:format("off msgs ~p~n", M),
@@ -145,6 +145,8 @@ client(S) ->
 	 RemoteHandler ! self(),
 	 % quickly set off to be notified of roster people presences
 	 exmpp_session:send_packet(RemoteSession,exmpp_presence:set_status(exmpp_presence:unavailable(),"")),
+	 % todo resurrect prio
+	 rejoin(RemoteSession,0,RoomTable),
 	 client_handler(S,RemoteSession,RemoteHandler,P,0,RoomTable).
 
 bnc_status_(T,P) ->
@@ -161,7 +163,8 @@ handle_packet(#xmlel{ns = NS} = Presence,Pr,T) when Presence#xmlel.name == 'pres
 			   [] ->
 			      true;
 			   To ->
-			      insert_room(T,To)
+			      %io:format("effort to leave room ~p~n",[To]),
+			      add_room(T,To)
 			   end,
 		 	   bnc_status_(exmpp_presence:set_type(Presence,available),Pr);
 	    	 _ ->
@@ -197,12 +200,12 @@ client_handler(So,Se,Pid,P,Pr,T) ->
 		      client_handler(So,Se,Pid,P,Pr,T);
 	 {tcp_closed,So} ->
 	 		%io:format("client ~p discon~n", [So]),
-			exmpp_xml:stop_parser(P);
-			%bnc_status(Se,Pr);
+			exmpp_xml:stop_parser(P),
+			bnc_status(Se,Pr);
 	 {tcp_error,So,_Reason} ->
 	 		%io:format("error client ~p sock ~p~n", [So,Reason]),
-			exmpp_xml:stop_parser(P);
-			%bnc_status(Se,Pr);
+			exmpp_xml:stop_parser(P),
+			bnc_status(Se,Pr);
 	 Packet = #xmlel{} ->
 	 	Binary = exmpp_stream:to_binary(Packet),
 	 	%io:format("server ~p~n", [Binary]),
@@ -223,8 +226,11 @@ reconnect(SL,T) ->
 		{_,ok} = update_session(T,S),
 		monitor(process,S),
 		S.
-rejoin(T,Pr) ->
-	 bnc_status_(#xmlel{ns=?NS_JABBER_CLIENT,name='presence',attrs=[exmpp_xml:attribute(<<"to">>,T)]},Pr).
+% todo speak muc not groupchat
+rejoin_(To,Pr) ->
+	 bnc_status_(#xmlel{ns=?NS_JABBER_CLIENT,name='presence',attrs=[exmpp_xml:attribute(<<"to">>,To)]},Pr).
+rejoin(S,Pr,RT) ->
+       lists:foreach(fun({_,To,_}) -> exmpp_session:send_packet(S,rejoin_(To,Pr)) end,get_all_(RT)).
 -include_lib("exmpp/include/exmpp_client.hrl").
 server_handler(P,Id,T,RT,SL,S,R,Pr) ->
 	 receive
@@ -255,10 +261,7 @@ server_handler(P,Id,T,RT,SL,S,R,Pr) ->
 		     %	   	case exmpp_xml:get_attribute(exmpp_xml:get_element(exmpp_xml:get_element(Packet,'x'),'status'),<<"code">>,[]) of
 		     %	     	     <<"307">> ->
 		     %		     	       From = exmpp_xml:get_attribute(Packet,<<"from">>,[]),
-					       % todo speak muc not groupchat
-		     %			       Rejoin = bnc_status_(#xmlel{ns=?NS_JABBER_CLIENT,name='presence',
-		     %			       		attrs=[exmpp_xml:attribute(<<"to">>,From)]},Pr),
-		     %					exmpp_session:send_packet(S,Rejoin);
+		     %			       exmpp_session:send_packet(S,rejoin_(From,Pr));
 		     %		     _ ->
 		     %			       true
 		     %		end,
@@ -286,7 +289,7 @@ server_handler(P,Id,T,RT,SL,S,R,Pr) ->
 	      	  NewS ->
 		     io:format("~p session resurrected~n", [T]),
 		     bnc_status(NewS,Pr),
-		     lists:foreach(fun({_,To,_}) -> exmpp_session:send_packet(NewS,rejoin(To,Pr)) end,get_rooms(RT)),
+		     rejoin(NewS,Pr,RT),
 	      	     server_handler(P,Id,T,RT,SL,NewS,?RECONNECT_TIME,Pr)
 	      % probably too much
 	      catch
@@ -307,6 +310,18 @@ init_db() ->
 	mnesia:create_schema([node()]),
 	mnesia:start(),
 	mnesia:create_table(sessions,[{attributes,record_info(fields,sessions)}]).
+get_all(T) ->
+	   F = fun() -> mnesia:select(T,[{'_',[],['$_']}]) end,
+	   {atomic,MR} = mnesia:transaction(F),
+	   MR.
+get_all_(T) ->
+		try mnesia:dirty_select(T,[{'_',[],['$_']}]) of
+		    All ->
+		    	All
+		catch
+		    _ ->
+		      []
+		end.
 find_session(J) ->
 		  F = fun() -> mnesia:match_object(#sessions{jid=J,_='_'}) end,
 		  {atomic,MR} = mnesia:transaction(F),
@@ -332,50 +347,52 @@ update_seen(J,T) ->
 		[MR] = find_session(J),
 		F = fun() -> mnesia:write(MR#sessions{seen=T}) end,
 		mnesia:transaction(F).
-get_messages(T) ->
-		try mnesia:dirty_select(T,[{'_',[],['$_']}]) of
-		    Messages ->
-		    	Messages
-		catch
-		    _ ->
-		      []
-		end.
 insert_message(T,I,P) ->
 		      catch mnesia:dirty_write(T,#messages{id=I,stamp=os:timestamp(),msg=P}).
-get_rooms(T) ->
-		try mnesia:dirty_select(T,[{'_',[],['$_']}]) of
-		    Rooms ->
-		    	Rooms
+find_stale(T,RT) ->
+		  try mnesia:dirty_select(RT,[{#rooms{seen='$1',_='_'},[{'<','$1',T}],['$_']}]) of
+		      Rooms ->
+		      	    Rooms
+		  catch
+		      _ ->
+		      	[]
+		  end.
+add_room(T,R) ->
+	        catch
+		try mnesia:dirty_match_object(T,#rooms{room=R,_='_'}) of
+		    [] ->
+		       mnesia:dirty_write(T,#rooms{room=R,seen=get_time()});
+		    [Room] ->
+		       mnesia:dirty_write(T,Room#rooms{seen=get_time()})
 		catch
 		    _ ->
-		      []
+		       mnesia:dirty_write(T,#rooms{room=R})
 		end.
-insert_room(T,R) ->
-		      catch mnesia:dirty_write(T,#rooms{room=R}).
-left_rooms(MR) ->
-	      RoomTable = binary_to_atom(room_table(atom_to_binary(MR#sessions.jid,latin1)),latin1),
-	      case get_rooms(RoomTable) of
-	      [] ->
-	      	 false;
-	      Rooms ->
+leave_rooms_(MR,R) ->
 	      	 Packet = exmpp_presence:unavailable(),
-	      	 lists:foreach(fun({_,To,_}) -> exmpp_session:send_packet(MR#sessions.session,
-		 		      exmpp_xml:set_attribute(Packet,<<"to">>,To)) end,Rooms),
-		 mnesia:clear_table(RoomTable)
-	      end.
+	      	 lists:foreach(fun(X = {_,To,_}) -> exmpp_session:send_packet(MR#sessions.session,
+		 		      exmpp_xml:set_attribute(Packet,<<"to">>,To)),
+				      catch mnesia:dirty_delete_object(X) end,R).
+leave_rooms(MR) ->
+		RoomTable = binary_to_atom(room_table(atom_to_binary(MR#sessions.jid,latin1)),latin1),
+		leave_rooms_(MR,RoomTable).
 
 dump() ->
-	 Tables = lists:filter(fun(X) -> X /= schema andalso X /= sessions end,mnesia:system_info(tables)),
+	 Tables = lists:filter(fun(X) -> mnesia:table_info(X,record_name) == messages end,mnesia:system_info(tables)),
 	 io:format("dumping ~p~n",[Tables]),
 	 mnesia:dump_tables(Tables).
-cleanup_(T,F) ->
-	 Tables = find_seen(get_time() - T),
-	 %io:format("clearing ~p~n",[Tables]),
-	 lists:foreach(F,Tables).
 cleanup(T) ->
-	 cleanup_(T,fun(X) -> kill_session(X) end).
-left(T) ->
-	 cleanup_(T,fun(X) -> left_rooms(X) end).
+	 Tables = find_seen(get_time() - T),
+	 io:format("clearing ~p~n",[Tables]),
+	 lists:foreach(fun(X) -> kill_session(X) end,Tables).
+leave_(T,MR) ->
+	 RoomTable = binary_to_atom(room_table(atom_to_binary(MR#sessions.jid,latin1)),latin1),
+	 StaleRooms = find_stale(get_time() - T,RoomTable),
+	 io:format("leaving ~p~n",[StaleRooms]),
+	 leave_rooms_(MR,StaleRooms).
+leave(T) ->
+	 Tables = get_all(sessions),
+	 lists:foreach(fun(X) -> leave_(T,X) end,Tables).
 
 kill(J) ->
 	[MR] = find_session(J),

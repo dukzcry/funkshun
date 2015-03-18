@@ -2,7 +2,7 @@
 
 -author('A.V. Lukyanov <lomka@gero.in>').
 
--export([start/0,dump/0,cleanup/1,kill/1]).
+-export([start/0,dump/0,cleanup/1,kill/1,get_all/1]).
 
 % user config
 -define(RECV_TIMEOUT,20000).
@@ -247,6 +247,9 @@ init_db() ->
 	mnesia:create_schema([node()]),
 	mnesia:start(),
 	mnesia:create_table(sessions,[{attributes,record_info(fields,sessions)}]).
+get_all(T) ->
+	   F = fun() -> mnesia:select(T,[{'_',[],['$_']}]) end,
+	   mnesia:transaction(F).
 find_session(J) ->
 		  F = fun() -> mnesia:match_object(#sessions{jid=J,_='_'}) end,
 		  {atomic,MR} = mnesia:transaction(F),
@@ -284,7 +287,7 @@ insert_message(T,I,P) ->
 		      catch mnesia:dirty_write(T,#messages{id=I,stamp=os:timestamp(),msg=P}).
 
 dump() ->
-	 Tables = lists:filter(fun(X) -> X /= schema andalso X /= sessions end,mnesia:system_info(tables)),
+	 Tables = lists:filter(fun(X) -> mnesia:table_info(X,record_name) == messages end,mnesia:system_info(tables)),
 	 io:format("dumping ~p~n",[Tables]),
 	 mnesia:dump_tables(Tables).
 cleanup(T) ->
