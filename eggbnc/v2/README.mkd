@@ -1,0 +1,12 @@
+MUC support implementation is simple and naive
+- the bouncer will remember a conference (to rejoin in case of network failure) only if you turned off your client properly (so it sent unavailable status to conference)
+- no password storing or captcha solving ;)
+
+Cleanup long-time unvisited rooms
+```
+0 7 * * * leave.sh eggbnc@myhost 604800
+```
+Manually leave all rooms for session
+```
+(eggbnc@myhost)1> eggbnc:leave_rooms(session).
+```

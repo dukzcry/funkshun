@@ -51,10 +51,9 @@ get_time() ->
 	   Secs.
 
 table_name(J) ->
-	Encoded = binary:replace(base64:encode(exmpp_jid:to_binary(J)),<<"/">>,<<"_">>,[global]),
-	binary_to_atom(Encoded,latin1).
+	binary:replace(base64:encode(exmpp_jid:to_binary(J)),<<"/">>,<<"_">>,[global]).
 connect(J,P) ->
-	TableName = table_name(J),
+	TableName = binary_to_atom(table_name(J),latin1),
 	ServerLambda = fun() -> server(J,P) end,
 	Session = ServerLambda(),
 	case find_session(TableName) of
@@ -87,7 +86,7 @@ send(S,D) ->
 	  gen_tcp:send(S,exmpp_stream:to_binary(D)).
 -include_lib("exmpp/include/exmpp.hrl").
 add_delayed(TS,#xmlel{ns = NS} = Message) ->
-	  case exmpp_xml:get_element(Message, NS, 'delay') of
+	  case exmpp_xml:get_element(Message,NS,'delay') of
 	       undefined ->
   	       		 {{Year,Month,Day},{Hour,Minute,Second}} = calendar:now_to_universal_time(TS),
 	  		 Stamp = io_lib:format("~4..0w-~2..0w-~2..0wT~2..0w:~2..0w:~2..0wZ",[Year,Month,Day,Hour,Minute,Second]),
@@ -110,6 +109,7 @@ client(S) ->
 	 ok = send(S,exmpp_stream:opening_reply(getandparse(S,1),random)),
 	 ok = send(S,exmpp_stream:features([exmpp_server_binding:feature(),exmpp_server_session:feature()])),
 	 Bind = getandparse(S,0),
+	 % for clients like os x messages
 	 BindWorkaround = Bind#xmlel{ns = ?NS_JABBER_CLIENT},
 	 Resource = case exmpp_server_binding:wished_resource(BindWorkaround) of
 	 	    	 undefined ->
@@ -125,7 +125,7 @@ client(S) ->
 	 % psi wants to set session even if we don't advert this feature
 	 ok = send(S,exmpp_server_session:establish(SessionWorkaround)),
 
-	 case get_messages(TableName) of
+	 case dirty_get_all(TableName) of
 	      [] -> true;
 	      M ->
 	      	%io:format("off msgs ~p~n", M),
@@ -149,12 +149,12 @@ client_handler(So,Se,P) ->
 	 inet:setopts(So,[{active,once}]),
 	 receive
 	 {tcp,So,Data} ->
-	 	      %io:format("client ~p~n", [Data]),
 		      case exmpp_xml:parse(P,Data) of
 		      	   continue ->
 			   	    true;
 		    	   E ->
 			     Elements = exmpp_xml:remove_whitespaces_from_list(E),
+			     %io:format("client ~p~n", [Data]),
 			     lists:foreach(fun(X) -> exmpp_session:send_packet(Se,X) end,Elements)
 		      end,
 		      client_handler(So,Se,P);
@@ -226,9 +226,9 @@ server_handler(P,Id,T,SL,R) ->
 	      io:format("~p server recon~n", [T]),
 	      timer:sleep(R),
 	      try reconnect(SL,T) of
-	      	  S ->
+	      	  NewS ->
 		     io:format("~p session resurrected~n", [T]),
-		     bnc_status(S),
+		     bnc_status(NewS),
 	      	     server_handler(P,Id,T,SL,?RECONNECT_TIME)
 	      % probably too much
 	      catch
@@ -249,7 +249,16 @@ init_db() ->
 	mnesia:create_table(sessions,[{attributes,record_info(fields,sessions)}]).
 get_all(T) ->
 	   F = fun() -> mnesia:select(T,[{'_',[],['$_']}]) end,
-	   mnesia:transaction(F).
+	   {atomic,MR} = mnesia:transaction(F),
+	   MR.
+dirty_get_all(T) ->
+		try mnesia:dirty_select(T,[{'_',[],['$_']}]) of
+		    All ->
+		    	All
+		catch
+		    _ ->
+		      []
+		end.
 find_session(J) ->
 		  F = fun() -> mnesia:match_object(#sessions{jid=J,_='_'}) end,
 		  {atomic,MR} = mnesia:transaction(F),
@@ -275,14 +284,6 @@ update_seen(J,T) ->
 		[MR] = find_session(J),
 		F = fun() -> mnesia:write(MR#sessions{seen=T}) end,
 		mnesia:transaction(F).
-get_messages(T) ->
-		try mnesia:dirty_select(T,[{'_',[],['$_']}]) of
-		    Messages ->
-		    	Messages
-		catch
-		    _ ->
-		      []
-		end.
 insert_message(T,I,P) ->
 		      catch mnesia:dirty_write(T,#messages{id=I,stamp=os:timestamp(),msg=P}).
 
@@ -291,8 +292,7 @@ dump() ->
 	 io:format("dumping ~p~n",[Tables]),
 	 mnesia:dump_tables(Tables).
 cleanup(T) ->
-	 Time = get_time() - T,
-	 Tables = find_seen(Time),
+	 Tables = find_seen(get_time() - T),
 	 io:format("clearing ~p~n",[Tables]),
 	 lists:foreach(fun(X) -> kill_session(X) end,Tables).
 

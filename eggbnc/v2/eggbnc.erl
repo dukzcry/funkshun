@@ -131,7 +131,7 @@ client(S) ->
 	 % psi wants to set session even if we don't advert this feature
 	 ok = send(S,exmpp_server_session:establish(SessionWorkaround)),
 
-	 case get_all_(TableName) of
+	 case dirty_get_all(TableName) of
 	      [] -> true;
 	      M ->
 	      	%io:format("off msgs ~p~n", M),
@@ -145,7 +145,7 @@ client(S) ->
 	 RemoteHandler ! self(),
 	 % quickly set off to be notified of roster people presences
 	 exmpp_session:send_packet(RemoteSession,exmpp_presence:set_status(exmpp_presence:unavailable(),"")),
-	 % todo resurrect prio
+	 % todo resurrect prio from db
 	 rejoin(RemoteSession,0,RoomTable),
 	 client_handler(S,RemoteSession,RemoteHandler,P,0,RoomTable).
 
@@ -154,7 +154,7 @@ bnc_status_(T,P) ->
 bnc_status(S,P) ->
 	   exmpp_session:send_packet(S,bnc_status_(exmpp_presence:available(),P)).
 
-handle_packet(#xmlel{ns = NS} = Presence,Pr,T) when Presence#xmlel.name == 'presence' ->
+handle_packet(#xmlel{ns = NS} = Presence,Pr,T,S) when Presence#xmlel.name == 'presence' ->
     case exmpp_xml:get_element(Presence,NS,'priority') of
         undefined ->
 	    case exmpp_presence:get_type(Presence) of
@@ -164,11 +164,11 @@ handle_packet(#xmlel{ns = NS} = Presence,Pr,T) when Presence#xmlel.name == 'pres
 			      true;
 			   To ->
 			      %io:format("effort to leave room ~p~n",[To]),
-			      add_room(T,To)
-			   end,
-		 	   bnc_status_(exmpp_presence:set_type(Presence,available),Pr);
+			      add_room(T,To),
+			      exmpp_session:send_packet(S,bnc_status_(exmpp_presence:set_type(Presence,available),Pr))
+			   end;
 	    	 _ ->
-		 	   Presence
+		 	   exmpp_session:send_packet(S,Presence)
       	      end;
         Priority_El ->
 	    case exmpp_xml:get_attribute(Presence,<<"to">>,[]) of
@@ -180,10 +180,10 @@ handle_packet(#xmlel{ns = NS} = Presence,Pr,T) when Presence#xmlel.name == 'pres
 	    _ ->
       	        true
 	    end,
-	    Presence
+	    exmpp_session:send_packet(S,Presence)
     end;
-handle_packet(Packet,_,_) ->
-	Packet.
+handle_packet(Packet,_,_,S) ->
+	exmpp_session:send_packet(S,Packet).
 % todo catch pings, stream ends, spoof from/to for server changed resources
 client_handler(So,Se,Pid,P,Pr,T) ->
 	 inet:setopts(So,[{active,once}]),
@@ -195,7 +195,7 @@ client_handler(So,Se,Pid,P,Pr,T) ->
 		    	   E ->
 			     Elements = exmpp_xml:remove_whitespaces_from_list(E),
 			     %io:format("client ~p~n", [Data]),
-			     lists:foreach(fun(X) -> exmpp_session:send_packet(Se,handle_packet(X,Pr,T)) end,Elements)
+			     lists:foreach(fun(X) -> handle_packet(X,Pr,T,Se) end,Elements)
 		      end,
 		      client_handler(So,Se,Pid,P,Pr,T);
 	 {tcp_closed,So} ->
@@ -230,7 +230,7 @@ reconnect(SL,T) ->
 rejoin_(To,Pr) ->
 	 bnc_status_(#xmlel{ns=?NS_JABBER_CLIENT,name='presence',attrs=[exmpp_xml:attribute(<<"to">>,To)]},Pr).
 rejoin(S,Pr,RT) ->
-       lists:foreach(fun({_,To,_}) -> exmpp_session:send_packet(S,rejoin_(To,Pr)) end,get_all_(RT)).
+       lists:foreach(fun(X) -> exmpp_session:send_packet(S,rejoin_(X#rooms.room,Pr)) end,dirty_get_all(RT)).
 -include_lib("exmpp/include/exmpp_client.hrl").
 server_handler(P,Id,T,RT,SL,S,R,Pr) ->
 	 receive
@@ -314,7 +314,7 @@ get_all(T) ->
 	   F = fun() -> mnesia:select(T,[{'_',[],['$_']}]) end,
 	   {atomic,MR} = mnesia:transaction(F),
 	   MR.
-get_all_(T) ->
+dirty_get_all(T) ->
 		try mnesia:dirty_select(T,[{'_',[],['$_']}]) of
 		    All ->
 		    	All
@@ -358,24 +358,17 @@ find_stale(T,RT) ->
 		      	[]
 		  end.
 add_room(T,R) ->
-	        catch
-		try mnesia:dirty_match_object(T,#rooms{room=R,_='_'}) of
-		    [] ->
-		       mnesia:dirty_write(T,#rooms{room=R,seen=get_time()});
-		    [Room] ->
-		       mnesia:dirty_write(T,Room#rooms{seen=get_time()})
-		catch
-		    _ ->
-		       mnesia:dirty_write(T,#rooms{room=R})
-		end.
+	        catch mnesia:dirty_write(T,#rooms{room=R,seen=get_time()}).
 leave_rooms_(MR,R) ->
 	      	 Packet = exmpp_presence:unavailable(),
-	      	 lists:foreach(fun(X = {_,To,_}) -> exmpp_session:send_packet(MR#sessions.session,
-		 		      exmpp_xml:set_attribute(Packet,<<"to">>,To)),
+	      	 lists:foreach(fun({_,To,_} = X) -> exmpp_session:send_packet(MR#sessions.session,exmpp_xml:set_attribute(Packet,<<"to">>,To)),
 				      catch mnesia:dirty_delete_object(X) end,R).
-leave_rooms(MR) ->
-		RoomTable = binary_to_atom(room_table(atom_to_binary(MR#sessions.jid,latin1)),latin1),
-		leave_rooms_(MR,RoomTable).
+roomtable_name(MR) ->
+		   binary_to_atom(room_table(atom_to_binary(MR#sessions.jid,latin1)),latin1).
+
+leave_rooms(T) ->
+		[MR] = find_session(T),
+		leave_rooms_(MR,dirty_get_all(roomtable_name(MR))).
 
 dump() ->
 	 Tables = lists:filter(fun(X) -> mnesia:table_info(X,record_name) == messages end,mnesia:system_info(tables)),
@@ -386,8 +379,7 @@ cleanup(T) ->
 	 io:format("clearing ~p~n",[Tables]),
 	 lists:foreach(fun(X) -> kill_session(X) end,Tables).
 leave_(T,MR) ->
-	 RoomTable = binary_to_atom(room_table(atom_to_binary(MR#sessions.jid,latin1)),latin1),
-	 StaleRooms = find_stale(get_time() - T,RoomTable),
+	 StaleRooms = find_stale(get_time() - T,roomtable_name(MR)),
 	 io:format("leaving ~p~n",[StaleRooms]),
 	 leave_rooms_(MR,StaleRooms).
 leave(T) ->
