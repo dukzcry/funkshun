@@ -157,15 +157,16 @@ bnc_status(S,P) ->
 handle_packet(#xmlel{ns = NS} = Presence,Pr,T,S) when Presence#xmlel.name == 'presence' ->
     case exmpp_xml:get_element(Presence,NS,'priority') of
         undefined ->
-	    case exmpp_presence:get_type(Presence) of
-	    	 unavailable ->
+	    case exmpp_stanza:get_type(Presence) of
+	    	 <<"unavailable">> ->
 		 	   case exmpp_xml:get_attribute(Presence,<<"to">>,[]) of
 			   [] ->
 			      true;
 			   To ->
 			      %io:format("effort to leave room ~p~n",[To]),
 			      add_room(T,To),
-			      exmpp_session:send_packet(S,bnc_status_(exmpp_presence:set_type(Presence,available),Pr))
+			      %exmpp_session:send_packet(S,bnc_status_(exmpp_presence:set_type(Presence,available),Pr))
+			      exmpp_session:send_packet(S,rejoin_(To,Pr))
 			   end;
 	    	 _ ->
 		 	   exmpp_session:send_packet(S,Presence)
