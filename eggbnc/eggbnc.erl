@@ -51,9 +51,9 @@ get_time() ->
 	   Secs.
 
 table_name(J) ->
-	binary:replace(base64:encode(exmpp_jid:to_binary(J)),<<"/">>,<<"_">>,[global]).
+	binary_to_atom(binary:replace(base64:encode(exmpp_jid:to_binary(J)),<<"/">>,<<"_">>,[global]),latin1).
 connect(J,P) ->
-	TableName = binary_to_atom(table_name(J),latin1),
+	TableName = table_name(J),
 	ServerLambda = fun() -> server(J,P) end,
 	Session = ServerLambda(),
 	case find_session(TableName) of
@@ -129,7 +129,7 @@ client(S) ->
 	      [] -> true;
 	      M ->
 	      	%io:format("off msgs ~p~n", M),
-	      	lists:foreach(fun({_,_,TS,Message}) -> send(S,add_delayed(TS,Message)) end,lists:sort(M)),
+	      	lists:foreach(fun(X) -> send(S,add_delayed(X#messages.stamp,X#messages.msg)) end,lists:sort(M)),
 		mnesia:clear_table(TableName), mnesia:dump_tables([TableName])
 	 end,
 
