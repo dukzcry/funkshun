@@ -148,7 +148,7 @@ client(S) ->
 	 RemoteHandler ! self(),
 	 % quickly set off to be notified of roster people presences
 	 exmpp_session:send_packet(RemoteSession,exmpp_presence:set_status(exmpp_presence:unavailable(),"")),
-	 % todo resurrect prio from db
+	 % todo resurrect prio from db, purpose?
 	 rejoin(RemoteSession,0),
 	 client_handler(S,RemoteSession,RemoteHandler,P,0,[Login,Domain]).
 
@@ -164,7 +164,8 @@ handle_packet(#xmlel{ns = NS} = Presence,Pr,S,BJ) when Presence#xmlel.name == 'p
 	    	 <<"unavailable">> ->
 		 	   case exmpp_xml:get_attribute(Presence,<<"to">>,[]) of
 			   [] ->
-			      true;
+			      % probably too much
+			      bnc_status(S,Pr);
 			   To ->
 			      %io:format("effort to leave room ~p~n",[To]),
 			      add_room(To,BJ,S),
@@ -205,11 +206,14 @@ client_handler(So,Se,Pid,P,Pr,BJ) ->
 	 {tcp_closed,So} ->
 	 		%io:format("client ~p discon~n", [So]),
 			exmpp_xml:stop_parser(P),
-			bnc_status(Se,Pr);
+			bnc_status(Se,Pr),
+			% set away in case client not set unavail
+			rejoin(Se,Pr);
 	 {tcp_error,So,_Reason} ->
 	 		%io:format("error client ~p sock ~p~n", [So,Reason]),
 			exmpp_xml:stop_parser(P),
-			bnc_status(Se,Pr);
+			bnc_status(Se,Pr),
+			rejoin(Se,Pr);
 	 Packet = #xmlel{} ->
 	 	Binary = exmpp_stream:to_binary(Packet),
 	 	%io:format("server ~p~n", [Binary]),
