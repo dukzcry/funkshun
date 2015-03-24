@@ -158,35 +158,36 @@ bnc_status(S,P) ->
 	   exmpp_session:send_packet(S,bnc_status_(exmpp_presence:available(),P)).
 
 handle_packet(#xmlel{ns = NS} = Presence,Pr,S,BJ) when Presence#xmlel.name == 'presence' ->
-    case exmpp_xml:get_element(Presence,NS,'priority') of
-        undefined ->
-	    case exmpp_stanza:get_type(Presence) of
-	    	 <<"unavailable">> ->
-		 	   case exmpp_xml:get_attribute(Presence,<<"to">>,[]) of
-			   [] ->
-			      % probably too much
-			      bnc_status(S,Pr);
-			   To ->
-			      %io:format("effort to leave room ~p~n",[To]),
-			      add_room(To,BJ,S),
-			      %exmpp_session:send_packet(S,bnc_status_(exmpp_presence:set_type(Presence,available),Pr))
-			      exmpp_session:send_packet(S,rejoin_(To,Pr))
-			   end;
-	    	 _ ->
-		 	   exmpp_session:send_packet(S,Presence)
-      	      end;
-        Priority_El ->
-	    case exmpp_xml:get_attribute(Presence,<<"to">>,[]) of
-    	    [] ->
+     Priority_El = exmpp_xml:get_element(Presence,NS,'priority'),
+     Type = exmpp_stanza:get_type(Presence),
+
+     case exmpp_xml:get_attribute(Presence,<<"to">>,[]) of
+     [] when is_record(Priority_El,xmlel) ->
 		self() ! case exmpp_xml:get_cdata_as_list(Priority_El) of
                 "" -> 0;
                 P  -> list_to_integer(P)
-            	end;
-	    _ ->
-      	        true
-	    end,
-	    exmpp_session:send_packet(S,Presence)
-    end;
+            	end,
+		exmpp_session:send_packet(S,Presence);
+     [] when Type == <<"unavailable">> ->
+     	     	% probably too much
+		bnc_status(S,Pr);
+     [] ->
+		exmpp_session:send_packet(S,Presence);
+
+     To when Type == <<"unavailable">> ->
+     	     	%io:format("effort to leave room ~p~n",[To]),
+		add_room(To,BJ,S),
+		%exmpp_session:send_packet(S,bnc_status_(exmpp_presence:set_type(Presence,available),Pr))
+		exmpp_session:send_packet(S,rejoin_(To,Pr));
+     To when Type == undefined ->
+     	     	exmpp_session:send_packet(S,#xmlel{ns=?NS_JABBER_CLIENT,name='presence',attrs=[exmpp_xml:attribute(<<"to">>,To),
+			exmpp_xml:attribute(<<"type">>,<<"unavailable">>)]}),
+		% todo needs delay here to always work
+		exmpp_session:send_packet(S,Presence);
+
+     _ ->
+     	        exmpp_session:send_packet(S,Presence)
+     end;
 handle_packet(Packet,_,S,_) ->
 	exmpp_session:send_packet(S,Packet).
 % todo catch pings, stream ends, spoof from/to for server changed resources
