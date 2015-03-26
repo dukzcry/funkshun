@@ -38,6 +38,7 @@ accept(LS) ->
 	        Pid = spawn(fun() -> client(Socket) end),
 	  	gen_tcp:controlling_process(Socket,Pid),
 		accept(LS);
+	       % probably too much
 	       _Catchall ->
 	       timer:sleep(60000),
 	       accept(LS)
@@ -180,9 +181,9 @@ handle_packet(#xmlel{ns = NS} = Presence,Pr,S,BJ) when Presence#xmlel.name == 'p
 		%exmpp_session:send_packet(S,bnc_status_(exmpp_presence:set_type(Presence,available),Pr))
 		exmpp_session:send_packet(S,rejoin_(To,Pr));
      To when Type == undefined ->
+     	     	% todo needs delay and gtalk groupchat care to always work
      	     	exmpp_session:send_packet(S,#xmlel{ns=?NS_JABBER_CLIENT,name='presence',attrs=[exmpp_xml:attribute(<<"to">>,To),
 			exmpp_xml:attribute(<<"type">>,<<"unavailable">>)]}),
-		% todo needs delay here to always work
 		exmpp_session:send_packet(S,Presence);
 
      _ ->
@@ -293,7 +294,7 @@ server_handler(P,Id,T,SL,S,R,Pr) ->
 	      	  NewS ->
 		     io:format("~p session resurrected~n", [T]),
 		     bnc_status(NewS,Pr),
-		     rejoin(NewS,Pr),
+		     renew_rooms(S,NewS,Pr),
 	      	     server_handler(P,Id,T,SL,NewS,?RECONNECT_TIME,Pr)
 	      % probably too much
 	      catch
@@ -369,6 +370,13 @@ add_room(R,BJ,S) ->
 		  end
 		  end,
 		  mnesia:transaction(F).
+renew_rooms(S,NewS,Pr) ->
+	      Rooms = find_rooms(S),
+	      F = fun() -> lists:foreach(fun(X) ->
+	      	mnesia:write(X#rooms{session=NewS}),
+	      	exmpp_session:send_packet(NewS,rejoin_(X#rooms.room,Pr)) end,Rooms)
+	      end,
+	      mnesia:transaction(F).
 leave_rooms_(R) ->
 	      	 Packet = exmpp_presence:unavailable(),
 	      	 lists:foreach(fun(X) -> exmpp_session:send_packet(X#rooms.session,exmpp_xml:set_attribute(Packet,<<"to">>,X#rooms.room)),

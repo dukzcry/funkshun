@@ -38,6 +38,7 @@ accept(LS) ->
 	        Pid = spawn(fun() -> client(Socket) end),
 	  	gen_tcp:controlling_process(Socket,Pid),
 		accept(LS);
+	       % probably too much
 	       _Catchall ->
 	       timer:sleep(60000),
 	       accept(LS)
