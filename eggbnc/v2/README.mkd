@@ -10,3 +10,5 @@ Manually leave all rooms for session
 ```
 (eggbnc@myhost)1> eggbnc:leave_rooms(session).
 ```
+
+As an alternative you may pass eggbnc:get_all(rooms) list with any filtering you need to the eggbnc:leave_rooms().
