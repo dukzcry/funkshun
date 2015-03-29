@@ -46,7 +46,7 @@ accept(LS) ->
 
 -record(sessions,{jid,pid,seen,session}).
 -record(messages,{id,stamp,msg}).
--record(rooms,{room,seen,barejid,session}).
+-record(rooms,{session,seen,barejid,room,prio}).
 
 get_time() ->
     {_,Secs,_} = os:timestamp(),
@@ -102,6 +102,9 @@ rejoin_(To,Pr) ->
 rejoin(S,Pr) ->
     Rooms = find_rooms(S),
     lists:foreach(fun(X) -> exmpp_session:send_packet(S,rejoin_(X#rooms.room,Pr)) end,Rooms).
+rejoin(S) ->
+    Rooms = find_rooms(S),
+    lists:foreach(fun(X) -> exmpp_session:send_packet(S,rejoin_(X#rooms.room,X#rooms.prio)) end,Rooms).
 
 client(S) ->
     Opening = getandparse(S,1),
@@ -147,8 +150,7 @@ client(S) ->
     RemoteHandler ! self(),
     %% quickly set off to be notified of roster people presences
     exmpp_session:send_packet(RemoteSession,exmpp_presence:set_status(exmpp_presence:unavailable(),"")),
-    %% todo resurrect prio from db, purpose?
-    rejoin(RemoteSession,0),
+    rejoin(RemoteSession),
     client_handler(S,RemoteSession,RemoteHandler,P,0,[Login,Domain]).
 
 bnc_status_(T,P) ->
@@ -175,7 +177,7 @@ handle_packet(#xmlel{ns = NS} = Presence,Pr,S,BJ) when Presence#xmlel.name == 'p
 
 	To when Type == <<"unavailable">> ->
 						%io:format("effort to leave room ~p~n",[To]),
-	    add_room(To,BJ,S),
+	    add_room(To,BJ,S,Pr),
 						%exmpp_session:send_packet(S,bnc_status_(exmpp_presence:set_type(Presence,available),Pr))
 	    exmpp_session:send_packet(S,rejoin_(To,Pr));
 	To when Type == undefined ->
@@ -357,14 +359,23 @@ find_rooms(S) ->
     F = fun() -> mnesia:match_object(#rooms{session=S,_='_'}) end,
     {atomic,MR} = mnesia:transaction(F),
     MR.
-add_room(R,BJ,S) ->
+add_room(R,BJ,S,Pr) ->
     F = fun() ->
-		MR = mnesia:match_object(#rooms{room=R,barejid=BJ,_='_'}),
-		case MR of
+		Rooms = mnesia:match_object(#rooms{room=R,_='_'}),
+		case Rooms of
 		    [] ->
-			mnesia:write(#rooms{room=R,barejid=BJ,session=S,seen=get_time()});
-		    [Room] ->
-			mnesia:write(Room#rooms{session=S,seen=get_time()})
+			mnesia:write(#rooms{room=R,barejid=BJ,session=S,seen=get_time(),prio=Pr});
+		    Rooms ->
+			lists:foreach(fun(Room) ->
+					      if Room#rooms.barejid == BJ ->
+						      if Room#rooms.session == S ->
+							      mnesia:write(Room#rooms{seen=get_time(),prio=Pr});
+							 true ->
+							      mnesia:write(#rooms{room=R,barejid=BJ,session=S,seen=get_time(),prio=Pr})
+						      end;
+						 true ->
+						      true
+					      end end,Rooms)
 		end
 	end,
     mnesia:transaction(F).
@@ -405,5 +416,6 @@ leave(T) ->
     io:format("leaving ~p~n",[StaleRooms]),
     leave_rooms_(StaleRooms).
 kill(J) ->
+						%leave_rooms(J),
     [MR] = find_session(J),
     kill_session(MR).
