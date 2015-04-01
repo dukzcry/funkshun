@@ -223,7 +223,8 @@ server_handler(P,Id,T,SL,R) ->
 	    server_handler(P,Id,T,SL,R);
 	restart ->
 	    io:format("~p server recon~n", [T]),
-	    timer:sleep(R),
+	    %% uncomment for delay
+	    %%timer:sleep(R),
 	    try reconnect(SL,T) of
 		NewS ->
 		    io:format("~p session resurrected~n", [T]),
