@@ -383,6 +383,7 @@ add_room(R,BJ,S,Pr) ->
 renew_rooms(S,NewS,Pr) ->
     Rooms = find_rooms(S),
     F = fun() -> lists:foreach(fun(X) ->
+				       mnesia:delete_object(X),
 				       mnesia:write(X#rooms{session=NewS}),
 				       exmpp_session:send_packet(NewS,rejoin_(X#rooms.room,Pr)) end,Rooms)
 	end,
