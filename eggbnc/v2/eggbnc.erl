@@ -12,7 +12,6 @@
 -define(LIMIT_DOMAIN,<<"example.com">>).
 server(J,P) ->
 						%io:format("server con~n"),
-    %% snapshot ver of exmpp is required for gtalk conn
     S = exmpp_session:start({1,0}),
     exmpp_session:auth_info(S,J,P),
     [{Host,Port}|_] = exmpp_dns:get_c2s("gmail.com"),
@@ -181,7 +180,7 @@ handle_packet(#xmlel{ns = NS} = Presence,Pr,S,BJ) when Presence#xmlel.name == 'p
 						%exmpp_session:send_packet(S,bnc_status_(exmpp_presence:set_type(Presence,available),Pr))
 	    exmpp_session:send_packet(S,rejoin_(To,Pr));
 	To when Type == undefined ->
-	    %% todo needs delay and gtalk groupchat care to always work
+	    %% todo needs delay to always work
 	    exmpp_session:send_packet(S,#xmlel{ns=?NS_JABBER_CLIENT,name='presence',attrs=[exmpp_xml:attribute(<<"to">>,To),
 											   exmpp_xml:attribute(<<"type">>,<<"unavailable">>)]}),
 	    exmpp_session:send_packet(S,Presence);
@@ -316,7 +315,10 @@ init_db() ->
     mnesia:create_schema([node()]),
     mnesia:start(),
     mnesia:create_table(sessions,[{attributes,record_info(fields,sessions)}]),
-    mnesia:create_table(rooms,[{attributes,record_info(fields,rooms)}]).
+    mnesia:create_table(rooms,[{attributes,record_info(fields,rooms)},{type,bag}]).
+update_bag(X,X1) ->
+    mnesia:delete_object(X),
+    mnesia:write(X1).
 get_all(T) ->
     F = fun() -> mnesia:select(T,[{'_',[],['$_']}]) end,
     {atomic,MR} = mnesia:transaction(F),
@@ -370,7 +372,7 @@ add_room(R,BJ,S,Pr) ->
 			lists:foreach(fun(Room) ->
 					      if Room#rooms.barejid == BJ ->
 						      if Room#rooms.session == S ->
-							      mnesia:write(Room#rooms{seen=get_time(),prio=Pr});
+							      update_bag(Room,Room#rooms{seen=get_time(),prio=Pr});
 							 true ->
 							      mnesia:write(#rooms{room=R,barejid=BJ,session=S,seen=get_time(),prio=Pr})
 						      end;
@@ -383,8 +385,7 @@ add_room(R,BJ,S,Pr) ->
 renew_rooms(S,NewS,Pr) ->
     Rooms = find_rooms(S),
     F = fun() -> lists:foreach(fun(X) ->
-				       mnesia:delete_object(X),
-				       mnesia:write(X#rooms{session=NewS}),
+				       update_bag(X,X#rooms{session=NewS}),
 				       exmpp_session:send_packet(NewS,rejoin_(X#rooms.room,Pr)) end,Rooms)
 	end,
     mnesia:transaction(F).

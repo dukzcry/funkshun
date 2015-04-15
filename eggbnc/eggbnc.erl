@@ -12,7 +12,6 @@
 -define(LIMIT_DOMAIN,<<"example.com">>).
 server(J,P) ->
 						%io:format("server con~n"),
-    %% snapshot ver of exmpp is required for gtalk conn
     S = exmpp_session:start({1,0}),
     exmpp_session:auth_info(S,J,P),
     [{Host,Port}|_] = exmpp_dns:get_c2s("gmail.com"),
