@@ -4,6 +4,12 @@
 
 -export([start/0,dump/0,cleanup/1,kill/1,get_all/1]).
 
+-include_lib("exmpp/include/exmpp.hrl").
+-include_lib("exmpp/include/exmpp_client.hrl").
+
+-record(sessions,{jid,pid,seen,session}).
+-record(messages,{id,stamp,msg}).
+
 %% user config
 -define(RECV_TIMEOUT,20000).
 -define(RECONNECT_TIME,30000).
@@ -19,6 +25,102 @@ server(J,P) ->
     {ok,_ServerJID} = exmpp_session:login(S,"PLAIN"),
     S.
 %%
+
+getandparse(S,D) ->
+    {ok,Data} = gen_tcp:recv(S,0,?RECV_TIMEOUT),
+						%CleanData = re:split(Data,"\\n",[{return,binary},trim]),
+						%io:format("recv from client ~p~n", [Data]),
+    case exmpp_xml:parse_document_fragment(Data,[{root_depth,D}]) of
+	continue ->
+	    getandparse(S,D);
+	E ->
+	    [Elements] = exmpp_xml:remove_whitespaces_from_list(E),
+	    Elements
+    end.
+client(S) ->
+    Opening = getandparse(S,1),
+    Domain = exmpp_stream:get_receiving_entity(Opening),
+
+    %% comment to allow all domains server handles
+    ?LIMIT_DOMAIN = Domain,
+
+    ok = send(S,exmpp_stream:opening_reply(Opening,random)),
+    ok = send(S,exmpp_stream:features(exmpp_server_sasl:feature(["PLAIN"]))),
+    {auth,_,Challenge} = exmpp_server_sasl:next_step(getandparse(S,0)),
+    [_Domain,Login,Password] = binary:split(list_to_binary(Challenge),[<<0>>],[global]),
+    ok = send(S,exmpp_server_sasl:success()),
+    ok = send(S,exmpp_stream:opening_reply(getandparse(S,1),random)),
+    ok = send(S,exmpp_stream:features([exmpp_server_binding:feature(),exmpp_server_session:feature()])),
+    Bind = getandparse(S,0),
+    %% for clients like os x messages
+    BindWorkaround = Bind#xmlel{ns=?NS_JABBER_CLIENT},
+
+    JID = exmpp_jid:make(binary_to_list(Login),binary_to_list(Domain),make_resource(BindWorkaround)),
+    {RemoteHandler,RemoteSession,TableName} = connect(JID,binary_to_list(Password)),
+
+    ok = send(S,exmpp_server_binding:bind(BindWorkaround,JID)),
+    Session = getandparse(S,0),
+    SessionWorkaround = Session#xmlel{ns=?NS_JABBER_CLIENT},
+    %% psi wants to set session even if we don't advert this feature
+    ok = send(S,exmpp_server_session:establish(SessionWorkaround)),
+
+    %% todo put in more appropriate place
+    send_messages(TableName,S),
+
+    P = exmpp_xml:start_parser([{root_depth,1}]),
+    %% since root elm is lost
+    exmpp_xml:parse(P,"<stream:stream xmlns:stream='fake'>"),
+
+    RemoteHandler ! self(),
+
+    %% quickly set off to be notified of roster people presences
+    send_packet(RemoteSession,exmpp_presence:set_status(exmpp_presence:unavailable(),"")),
+
+    client_handler(S,RemoteSession,P).
+
+send(S,D) ->
+    Binary = exmpp_stream:to_binary(D),
+						%io:format("to client ~p~n", [Binary]),
+    gen_tcp:send(S,Binary).
+send_packet(S,P) ->
+						%io:format("to server ~p~n",[exmpp_stream:to_binary(P)]),
+    exmpp_session:send_packet(S,P).
+make_resource(B) ->
+    case exmpp_server_binding:wished_resource(B) of
+	undefined ->
+	    "eggbouncer";
+	R ->
+	    R
+    end.
+send_messages(T,S) ->
+    case dirty_get_all(T) of
+	[] -> true;
+	M ->
+						%io:format("off msgs ~p~n", M),
+	    lists:foreach(fun(X) -> send(S,add_delayed(X#messages.stamp,X#messages.msg)) end,lists:sort(M)),
+	    mnesia:clear_table(T),
+	    mnesia:dump_tables([T])
+    end.
+add_delayed(TS,#xmlel{ns = NS} = Message) ->
+    case exmpp_xml:get_element(Message,NS,'delay') of
+	undefined ->
+	    {{Year,Month,Day},{Hour,Minute,Second}} = calendar:now_to_universal_time(TS),
+	    Stamp = io_lib:format("~4..0w-~2..0w-~2..0wT~2..0w:~2..0w:~2..0wZ",[Year,Month,Day,Hour,Minute,Second]),
+	    Delayed = #xmlel{ns=?NS_DELAY,name='delay',attrs=[exmpp_xml:attribute(<<"stamp">>,Stamp)]},
+	    exmpp_xml:append_child(Message,Delayed);
+	_ ->
+	    Message
+    end.
+get_time() ->
+    {_,Secs,_} = os:timestamp(),
+    Secs.
+bnc_status(S) ->
+    send_packet(S,exmpp_presence:set_status(exmpp_presence:set_show(exmpp_presence:available(),'xa'),"eggbouncer")).
+reconnect(SL,T) ->
+    S = SL(),
+    {_,ok} = update_session(T,S),
+    monitor(process,S),
+    S.
 
 start() ->
     exmpp:start(),
@@ -43,13 +145,6 @@ accept(LS) ->
 	    accept(LS)
     end.
 
--record(sessions,{jid,pid,seen,session}).
--record(messages,{id,stamp,msg}).
-
-get_time() ->
-    {_,Secs,_} = os:timestamp(),
-    Secs.
-
 connect(J,P) ->
     TableName = binary_to_atom(binary:replace(base64:encode(exmpp_jid:to_binary(J)),<<"/">>,<<"_">>,[global]),latin1),
     ServerLambda = fun() -> server(J,P) end,
@@ -69,79 +164,8 @@ connect(J,P) ->
 	    {Pid,Session,TableName}
     end.
 
-getandparse(S,D) ->
-    {ok,Data} = gen_tcp:recv(S,0,?RECV_TIMEOUT),
-						%CleanData = re:split(Data,"\\n",[{return,binary},trim]),
-						%io:format("got recv ~p~n", [CleanData]),
-    case exmpp_xml:parse_document_fragment(Data,[{root_depth,D}]) of
-	continue ->
-	    getandparse(S,D);
-	E ->
-	    [Elements] = exmpp_xml:remove_whitespaces_from_list(E),
-	    Elements
-    end.
-send(S,D) ->
-    gen_tcp:send(S,exmpp_stream:to_binary(D)).
--include_lib("exmpp/include/exmpp.hrl").
-add_delayed(TS,#xmlel{ns = NS} = Message) ->
-    case exmpp_xml:get_element(Message,NS,'delay') of
-	undefined ->
-	    {{Year,Month,Day},{Hour,Minute,Second}} = calendar:now_to_universal_time(TS),
-	    Stamp = io_lib:format("~4..0w-~2..0w-~2..0wT~2..0w:~2..0w:~2..0wZ",[Year,Month,Day,Hour,Minute,Second]),
-	    Delayed = #xmlel{ns=?NS_DELAY,name='delay',attrs=[exmpp_xml:attribute(<<"stamp">>,Stamp)]},
-	    exmpp_xml:append_child(Message,Delayed);
-	_ ->
-	    Message
-    end.
-client(S) ->
-    Opening = getandparse(S,1),
-    Domain = exmpp_stream:get_receiving_entity(Opening),
-    %% comment to allow all domains server handles
-    ?LIMIT_DOMAIN = Domain,
-    ok = send(S,exmpp_stream:opening_reply(Opening,random)),
-    ok = send(S,exmpp_stream:features(exmpp_server_sasl:feature(["PLAIN"]))),
-    {auth,_,Challenge} = exmpp_server_sasl:next_step(getandparse(S,0)),
-    [_Domain,Login,Password] = binary:split(list_to_binary(Challenge),[<<0>>],[global]),
-    ok = send(S,exmpp_server_sasl:success()),
-
-    ok = send(S,exmpp_stream:opening_reply(getandparse(S,1),random)),
-    ok = send(S,exmpp_stream:features([exmpp_server_binding:feature(),exmpp_server_session:feature()])),
-    Bind = getandparse(S,0),
-    %% for clients like os x messages
-    BindWorkaround = Bind#xmlel{ns = ?NS_JABBER_CLIENT},
-    Resource = case exmpp_server_binding:wished_resource(BindWorkaround) of
-		   undefined ->
-		       "eggbouncer";
-		   R ->
-		       R
-	       end,
-    JID = exmpp_jid:make(binary_to_list(Login),binary_to_list(Domain),Resource),
-    {RemoteHandler,RemoteSession,TableName} = connect(JID,binary_to_list(Password)),
-    ok = send(S,exmpp_server_binding:bind(BindWorkaround,JID)),
-    Session = getandparse(S,0),
-    SessionWorkaround = Session#xmlel{ns = ?NS_JABBER_CLIENT},
-    %% psi wants to set session even if we don't advert this feature
-    ok = send(S,exmpp_server_session:establish(SessionWorkaround)),
-
-    case dirty_get_all(TableName) of
-	[] -> true;
-	M ->
-						%io:format("off msgs ~p~n", M),
-	    lists:foreach(fun(X) -> send(S,add_delayed(X#messages.stamp,X#messages.msg)) end,lists:sort(M)),
-	    mnesia:clear_table(TableName), mnesia:dump_tables([TableName])
-    end,
-
-    P = exmpp_xml:start_parser([{root_depth,1}]),
-    %% since root elm is lost
-    exmpp_xml:parse(P,"<stream:stream xmlns:stream='fake'>"),
-    RemoteHandler ! self(),
-    %% quickly set off to be notified of roster people presences
-    exmpp_session:send_packet(RemoteSession,exmpp_presence:set_status(exmpp_presence:unavailable(),"")),
-    client_handler(S,RemoteSession,P).
-
-bnc_status(S) ->
-    exmpp_session:send_packet(S,exmpp_presence:set_status(exmpp_presence:set_show(exmpp_presence:available(),'xa'),"eggbouncer")).
-
+handle_packet(Packet,S) ->
+    exmpp_session:send_packet(S,Packet).
 %% todo catch pings, stream ends, spoof from/to for server changed resources
 client_handler(So,Se,P) ->
     inet:setopts(So,[{active,once}]),
@@ -152,8 +176,8 @@ client_handler(So,Se,P) ->
 		    true;
 		E ->
 		    Elements = exmpp_xml:remove_whitespaces_from_list(E),
-						%io:format("client ~p~n", [Data]),
-		    lists:foreach(fun(X) -> exmpp_session:send_packet(Se,X) end,Elements)
+						%io:format("from client ~p~n", [Data]),
+		    lists:foreach(fun(X) -> handle_packet(X,Se) end,Elements)
 	    end,
 	    client_handler(So,Se,P);
 	{tcp_closed,So} ->
@@ -165,9 +189,8 @@ client_handler(So,Se,P) ->
 	    exmpp_xml:stop_parser(P),
 	    bnc_status(Se);
 	Packet = #xmlel{} ->
-	    Binary = exmpp_stream:to_binary(Packet),
-						%io:format("server ~p~n", [Binary]),
-	    gen_tcp:send(So,Binary),
+						%send(So,Packet),
+	    gen_tcp:send(So,exmpp_stream:to_binary(Packet)),
 	    client_handler(So,Se,P);
 	stop ->
 	    exmpp_xml:stop_parser(P);
@@ -176,12 +199,6 @@ client_handler(So,Se,P) ->
 	    client_handler(So,Se,P)
     end.
 
-reconnect(SL,T) ->
-    S = SL(),
-    {_,ok} = update_session(T,S),
-    monitor(process,S),
-    S.
--include_lib("exmpp/include/exmpp_client.hrl").
 server_handler(P,Id,T,SL,R) ->
     receive
 	Record = #received_packet{raw_packet=Packet} ->
@@ -206,17 +223,13 @@ server_handler(P,Id,T,SL,R) ->
 		    insert_message(T,Id,Packet),
 		    server_handler(P,Id+1,T,SL,R);
 		_Catchall ->
+						%io:format("server packet catch all ~p~n",[Record]),
 		    server_handler(P,Id,T,SL,R)
 	    end;
 	P1 when is_pid(P1) ->
 	    server_handler(P1,0,T,SL,R);
 	{'DOWN',_,_,_,_} ->
-	    case is_process_alive(P) of
-		true ->
-		    P ! stop;
-		false ->
-		    true
-	    end,
+	    P ! stop,
 	    update_session(T,'session-in-restart'),
 	    self() ! restart,
 	    server_handler(P,Id,T,SL,R);
@@ -236,7 +249,7 @@ server_handler(P,Id,T,SL,R) ->
 		    server_handler(P,Id,T,SL,R*2)
 	    end;
 	stop ->
-	    true;
+	    P ! stop;
 	_Catchall ->
 						%io:format("server catchall ~p~n",[_Catchall]),
 	    server_handler(P,Id,T,SL,R)
@@ -294,7 +307,6 @@ cleanup(T) ->
     Tables = find_seen(get_time() - T),
     io:format("clearing ~p~n",[Tables]),
     lists:foreach(fun(X) -> kill_session(X) end,Tables).
-
 kill(J) ->
     [MR] = find_session(J),
     kill_session(MR).
