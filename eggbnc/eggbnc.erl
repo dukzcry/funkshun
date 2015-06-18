@@ -112,8 +112,8 @@ add_delayed(TS,#xmlel{ns = NS} = Message) ->
 	    Message
     end.
 get_time() ->
-    {_,Secs,_} = os:timestamp(),
-    Secs.
+    {Mega,Secs,_} = os:timestamp(),
+    Mega*1000000 + Secs.
 bnc_status(S) ->
     send_packet(S,exmpp_presence:set_status(exmpp_presence:set_show(exmpp_presence:available(),'xa'),"eggbouncer")).
 reconnect(SL,T) ->
@@ -151,6 +151,7 @@ connect(J,P) ->
     Session = ServerLambda(),
     case find_session(TableName) of
 	[Record] ->
+	    %% todo handle potential servers which don't like two sessions with same resource
 	    exmpp_session:stop(Session),
 	    {_,ok} = update_seen(TableName,get_time()),
 	    {Record#sessions.pid,Record#sessions.session,TableName};

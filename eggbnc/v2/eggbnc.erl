@@ -114,8 +114,8 @@ add_delayed(TS,#xmlel{ns = NS} = Message) ->
 	    Message
     end.
 get_time() ->
-    {_,Secs,_} = os:timestamp(),
-    Secs.
+    {Mega,Secs,_} = os:timestamp(),
+    Mega*1000000 + Secs.
 bnc_status_(T,P) ->
     exmpp_presence:set_priority(exmpp_presence:set_status(exmpp_presence:set_show(T,'xa'),"eggbouncer"),P).
 bnc_status(S,P) ->
@@ -164,6 +164,7 @@ connect(J,P) ->
     Session = ServerLambda(),
     case find_session(TableName) of
 	[Record] ->
+	    %% todo handle potential servers which don't like two sessions with same resource
 	    exmpp_session:stop(Session),
 	    {_,ok} = update_seen(TableName,get_time()),
 	    {Record#sessions.pid,Record#sessions.session,TableName};
@@ -228,7 +229,7 @@ client_handler(So,Se,Pid,P,Pr,BJ) ->
 						%io:format("client ~p discon~n", [So]),
 	    exmpp_xml:stop_parser(P),
 	    bnc_status(Se,Pr),
-	    %% set away in case client not set unavail
+	    %% set away for rooms in case client not set unavail
 	    rejoin(Se,Pr);
 	{tcp_error,So,_Reason} ->
 						%io:format("error client ~p sock ~p~n", [So,Reason]),
@@ -272,7 +273,7 @@ server_handler(P,Id,T,SL,S,R,Pr) ->
 				 Record#received_packet.type_attr == "subscribed") ->
 		    insert_message(T,Id,Packet),
 		    server_handler(P,Id+1,T,SL,S,R,Pr);
-		%% uncomment to autorejoin on kick
+		%% uncomment to autorejoin room on kick
 		%%false when Record#received_packet.packet_type == 'presence' andalso
 		%%	   Record#received_packet.type_attr == "unavailable" ->
 		%%    case exmpp_xml:get_attribute(exmpp_xml:get_element(exmpp_xml:get_element(Packet,'x'),'status'),<<"code">>,[]) of
