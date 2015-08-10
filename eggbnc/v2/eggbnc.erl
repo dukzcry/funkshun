@@ -160,15 +160,14 @@ accept(LS) ->
 
 connect(J,P) ->
     TableName = binary_to_atom(binary:replace(base64:encode(exmpp_jid:to_binary(J)),<<"/">>,<<"_">>,[global]),latin1),
-    ServerLambda = fun() -> server(J,P) end,
-    Session = ServerLambda(),
     case find_session(TableName) of
 	[Record] ->
-	    %% todo handle potential servers which don't like two sessions with same resource
-	    exmpp_session:stop(Session),
+	    exmpp_session:stop(server(exmpp_jid:bare(J),P)),
 	    {_,ok} = update_seen(TableName,get_time()),
 	    {Record#sessions.pid,Record#sessions.session,TableName};
 	[] ->
+	    ServerLambda = fun() -> server(J,P) end,
+	    Session = ServerLambda(),
 	    Pid = spawn(fun() -> monitor(process,Session), server_handler([],0,TableName,ServerLambda,Session,?RECONNECT_TIME,0) end),
 	    %% todo kill proc on error
 	    ok = exmpp_session:set_controlling_process(Session,Pid),

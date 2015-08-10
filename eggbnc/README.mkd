@@ -1,6 +1,6 @@
 Is a multi-user per resource XMPP (Jabber) bouncer and proxy with no special requirements for client
 ###Howto
-Setup Erlang and snapshot of exmpp. Adjust bouncer config; if you're not for gtalk, roll your own server() function following exmpp guide
+Setup Erlang and snapshot of exmpp. Adjust bouncer config
 
 Start with
 ```
