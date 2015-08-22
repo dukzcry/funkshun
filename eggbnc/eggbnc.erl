@@ -13,7 +13,7 @@
 %% user config
 -define(RECV_TIMEOUT,20000).
 -define(RECONNECT_TIME,30000).
--define(LISTEN_ADDR,{127,0,0,1}).
+-define(LISTEN_ADDR,{0,0,0,0}).
 -define(LISTEN_PORT,5222).
 -define(LIMIT_DOMAIN,<<"example.com">>).
 server(J,P) ->
@@ -128,10 +128,7 @@ start() ->
     listen().
 
 listen() ->
-    {ok,Socket} = gen_tcp:listen(?LISTEN_PORT,[binary,{packet,0},{active,false},{reuseaddr,true}
-					       %% comment to allow listening on all addresses
-					      ,{ip,?LISTEN_ADDR}
-					      ]),
+    {ok,Socket} = gen_tcp:listen(?LISTEN_PORT,[binary,{packet,0},{active,false},{reuseaddr,true},{ip,?LISTEN_ADDR}]),
     accept(Socket).
 accept(LS) ->
     case gen_tcp:accept(LS) of
@@ -147,7 +144,7 @@ accept(LS) ->
 
 connect(J,P) ->
     TableName = binary_to_atom(binary:replace(base64:encode(exmpp_jid:to_binary(J)),<<"/">>,<<"_">>,[global]),latin1),
-    case find_session(TableName) of
+    case maybe_kill_session(find_session(TableName)) of
 	[Record] ->
 	    exmpp_session:stop(server(exmpp_jid:bare(J),P)),
 	    {_,ok} = update_seen(TableName,get_time()),
@@ -288,6 +285,19 @@ kill_session(MR) ->
     F = fun() -> mnesia:delete_object(MR) end,
     mnesia:transaction(F),
     mnesia:clear_table(MR#sessions.jid).
+%% todo supervise and relaunch server proc instead
+maybe_kill_session([MR]) ->
+    case is_process_alive(MR#sessions.pid) of
+	true ->
+	    [MR];
+	false ->
+	    exmpp_session:stop(MR#sessions.session),
+	    F = fun() -> mnesia:delete_object(MR) end,
+	    mnesia:transaction(F),
+	    []
+    end;
+maybe_kill_session([]) ->
+    [].
 find_seen(T) ->
     F = fun() -> mnesia:select(sessions,[{#sessions{seen='$1',_='_'},[{'<','$1',T}],['$_']}]) end,
     {atomic,MR} = mnesia:transaction(F),
