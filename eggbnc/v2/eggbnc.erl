@@ -42,7 +42,7 @@ client(S) ->
     Opening = getandparse(S,1),
     Domain = exmpp_stream:get_receiving_entity(Opening),
 
-    %% comment to allow all domains server handles
+    %% COMMENT to allow all domains server handles
     ?LIMIT_DOMAIN = Domain,
 
     ok = send(S,exmpp_stream:opening_reply(Opening,random)),
@@ -254,11 +254,16 @@ server_handler(P,Id,T,SL,S,R,Pr) ->
 						%P ! exmpp_xml:set_attribute(Packet,<<"to">>,FullJID),
 		    P ! Packet,
 		    server_handler(P,Id,T,SL,S,R,Pr);
-		%% comment when guard for off storing of other types of stanza
+		%% COMMENT when guard for off storing of other types of stanza
 		false when Record#received_packet.packet_type == message andalso
 			   Record#received_packet.type_attr =/= "error" ->
 		    case exmpp_message:get_body(Packet) of
 			undefined ->
+			    server_handler(P,Id,T,SL,S,R,Pr);
+			_ when Record#received_packet.type_attr == "groupchat" ->
+			    %% UNCOMMENT to store room public messages (as private ones)
+			    %%insert_message(T,Id,exmpp_xml:set_attribute(Packet,<<"type">>,"chat")),
+			    %%server_handler(P,Id+1,T,SL,S,R,Pr);
 			    server_handler(P,Id,T,SL,S,R,Pr);
 			_ ->
 			    insert_message(T,Id,Packet),
@@ -269,7 +274,7 @@ server_handler(P,Id,T,SL,S,R,Pr) ->
 				 Record#received_packet.type_attr == "subscribed") ->
 		    insert_message(T,Id,Packet),
 		    server_handler(P,Id+1,T,SL,S,R,Pr);
-		%% uncomment to autorejoin room on kick
+		%% UNCOMMENT to autorejoin room on kick
 		%%false when Record#received_packet.packet_type == 'presence' andalso
 		%%	   Record#received_packet.type_attr == "unavailable" ->
 		%%    case exmpp_xml:get_attribute(exmpp_xml:get_element(exmpp_xml:get_element(Packet,'x'),'status'),<<"code">>,[]) of
@@ -297,7 +302,7 @@ server_handler(P,Id,T,SL,S,R,Pr) ->
 	    server_handler(P,Id,T,SL,S,R,Pr);
 	restart ->
 	    io:format("~p server recon~n", [T]),
-	    %% uncomment for delay
+	    %% UNCOMMENT for delay
 	    %%timer:sleep(R),
 	    try reconnect(SL,T) of
 		NewS ->

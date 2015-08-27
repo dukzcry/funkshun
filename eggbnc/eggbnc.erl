@@ -41,7 +41,7 @@ client(S) ->
     Opening = getandparse(S,1),
     Domain = exmpp_stream:get_receiving_entity(Opening),
 
-    %% comment to allow all domains server handles
+    %% COMMENT to allow all domains server handles
     ?LIMIT_DOMAIN = Domain,
 
     ok = send(S,exmpp_stream:opening_reply(Opening,random)),
@@ -204,11 +204,13 @@ server_handler(P,Id,T,SL,R) ->
 						%P ! exmpp_xml:set_attribute(Packet,<<"to">>,FullJID),
 		    P ! Packet,
 		    server_handler(P,Id,T,SL,R);
-		%% comment when guard for off storing of other types of stanza
+		%% COMMENT when guard for off storing of other types of stanza
 		false when Record#received_packet.packet_type == message andalso
 			   Record#received_packet.type_attr =/= "error" ->
 		    case exmpp_message:get_body(Packet) of
 			undefined ->
+			    server_handler(P,Id,T,SL,R);
+			_ when Record#received_packet.type_attr == "groupchat" ->
 			    server_handler(P,Id,T,SL,R);
 			_ ->
 			    insert_message(T,Id,Packet),
@@ -232,7 +234,7 @@ server_handler(P,Id,T,SL,R) ->
 	    server_handler(P,Id,T,SL,R);
 	restart ->
 	    io:format("~p server recon~n", [T]),
-	    %% uncomment for delay
+	    %% UNCOMMENT for delay
 	    %%timer:sleep(R),
 	    try reconnect(SL,T) of
 		NewS ->
