@@ -21,7 +21,10 @@ server(J,P) ->
     S = exmpp_session:start({1,0}),
     exmpp_session:auth_info(S,J,P),
     [{Host,Port}|_] = exmpp_dns:get_c2s("gmail.com"),
-    {ok,_,_} = exmpp_session:connect_TCP(S,Host,Port,[{starttls,enabled}]),
+    {ok,_,_} = exmpp_session:connect_TCP(S,Host,Port,[{starttls,enabled}
+						      %% UNCOMMENT to enable idle ping
+						      %%,{whitespace_ping,60000}
+						     ]),
     {ok,_ServerJID} = exmpp_session:login(S,"PLAIN"),
     S.
 %%
@@ -101,7 +104,7 @@ send_messages(T,S) ->
 	    mnesia:clear_table(T),
 	    mnesia:dump_tables([T])
     end.
-add_delayed(TS,#xmlel{ns = NS} = Message) ->
+add_delayed(TS,#xmlel{ns=NS}=Message) ->
     case exmpp_xml:get_element(Message,NS,'delay') of
 	undefined ->
 	    {{Year,Month,Day},{Hour,Minute,Second}} = calendar:now_to_universal_time(TS),
@@ -263,13 +266,7 @@ get_all(T) ->
     {atomic,MR} = mnesia:transaction(F),
     MR.
 dirty_get_all(T) ->
-    try mnesia:dirty_select(T,[{'_',[],['$_']}]) of
-	All ->
-	    All
-    catch
-	_ ->
-	    []
-    end.
+    mnesia:dirty_select(T,[{'_',[],['$_']}]).
 find_session(J) ->
     F = fun() -> mnesia:match_object(#sessions{jid=J,_='_'}) end,
     {atomic,MR} = mnesia:transaction(F),
