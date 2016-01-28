@@ -22,7 +22,7 @@ server(J,P) ->
     exmpp_session:auth_info(S,J,P),
     [{Host,Port}|_] = exmpp_dns:get_c2s("gmail.com"),
     {ok,_,_} = exmpp_session:connect_TCP(S,Host,Port,[{starttls,enabled}
-						      %% UNCOMMENT to enable idle ping
+						      %% UNCOMMENT to enable whitespace ping
 						      %%,{whitespace_ping,60000}
 						     ]),
     {ok,_ServerJID} = exmpp_session:login(S,"PLAIN"),
@@ -118,7 +118,7 @@ get_time() ->
     {Mega,Secs,_} = os:timestamp(),
     Mega*1000000 + Secs.
 bnc_status(S) ->
-    send_packet(S,exmpp_presence:set_status(exmpp_presence:set_show(exmpp_presence:available(),'xa'),"eggbouncer")).
+    send_packet(S,exmpp_presence:set_show(exmpp_presence:presence(available,"eggbouncer"),'xa')).
 reconnect(SL,T) ->
     S = SL(),
     {_,ok} = update_session(T,S),
@@ -204,7 +204,7 @@ server_handler(P,Id,T,SL,R) ->
 	Record = #received_packet{raw_packet=Packet} ->
 	    case is_process_alive(P) of
 		true ->
-						%P ! exmpp_xml:set_attribute(Packet,<<"to">>,FullJID),
+						%P ! exmpp_stanza:set_recipient(Packet,FullJID),
 		    P ! Packet,
 		    server_handler(P,Id,T,SL,R);
 		%% COMMENT when guard for off storing of other types of stanza

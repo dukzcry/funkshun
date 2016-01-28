@@ -9,7 +9,7 @@
 
 -record(sessions,{jid,pid,seen,session}).
 -record(messages,{id,stamp,msg}).
--record(rooms,{session,seen,barejid,room,prio}).
+-record(rooms,{session,seen,barejid,room,prio,is_gateway}).
 
 %% user config
 -define(RECV_TIMEOUT,20000).
@@ -23,7 +23,7 @@ server(J,P) ->
     exmpp_session:auth_info(S,J,P),
     [{Host,Port}|_] = exmpp_dns:get_c2s("gmail.com"),
     {ok,_,_} = exmpp_session:connect_TCP(S,Host,Port,[{starttls,enabled}
-						      %% UNCOMMENT to enable idle ping
+						      %% UNCOMMENT to enable whitespace ping
 						      %%,{whitespace_ping,60000}
 						     ]),
     {ok,_ServerJID} = exmpp_session:login(S,"PLAIN"),
@@ -118,24 +118,28 @@ add_delayed(TS,#xmlel{ns=NS}=Message) ->
 get_time() ->
     {Mega,Secs,_} = os:timestamp(),
     Mega*1000000 + Secs.
-bnc_status_(T,P) ->
-    exmpp_presence:set_priority(exmpp_presence:set_status(exmpp_presence:set_show(T,'xa'),"eggbouncer"),P).
+bnc_status_(P) ->
+    exmpp_presence:set_priority(exmpp_presence:set_show(exmpp_presence:presence(available,"eggbouncer"),'xa'),P).
 bnc_status(S,P) ->
-    send_packet(S,bnc_status_(exmpp_presence:available(),P)).
+    send_packet(S,bnc_status_(P)).
 reconnect(SL,T) ->
     S = SL(),
     {_,ok} = update_session(T,S),
     monitor(process,S),
     S.
 %% todo speak muc not groupchat
-rejoin_(To,Pr) ->
-    bnc_status_(#xmlel{ns=?NS_JABBER_CLIENT,name='presence',attrs=[exmpp_xml:attribute(<<"to">>,To)]},Pr).
+rejoin_(To,P) ->
+    exmpp_stanza:set_recipient(P,To).
 rejoin(S,Pr) ->
     Rooms = find_rooms(S),
-    lists:foreach(fun(X) -> send_packet(S,rejoin_(X#rooms.room,Pr)) end,Rooms).
+    lists:foreach(fun(X) -> send_packet(S,rejoin_(X#rooms.room,bnc_status_(Pr))) end,Rooms).
 rejoin(S) ->
     Rooms = find_rooms(S),
-    lists:foreach(fun(X) -> send_packet(S,rejoin_(X#rooms.room,X#rooms.prio)) end,Rooms).
+    lists:foreach(fun(X) -> send_packet(S,rejoin_(X#rooms.room,if X#rooms.is_gateway ->
+								       %% todo doesnt help much
+								       exmpp_presence:set_priority(exmpp_presence:available(),X#rooms.prio);
+								  true ->
+								       bnc_status_(X#rooms.prio) end)) end,Rooms).
 
 start() ->
     exmpp:start(),
@@ -180,28 +184,27 @@ handle_packet(#xmlel{ns=NS}=Presence,Pr,S,BJ) when Presence#xmlel.name == 'prese
     Priority_El = exmpp_xml:get_element(Presence,NS,'priority'),
     Type = exmpp_stanza:get_type(Presence),
 
-    case exmpp_xml:get_attribute(Presence,<<"to">>,[]) of
-	[] when is_record(Priority_El,xmlel) ->
+    case exmpp_stanza:get_recipient(Presence) of
+	undefined when is_record(Priority_El,xmlel) ->
 	    self() ! case exmpp_xml:get_cdata_as_list(Priority_El) of
 			 "" -> 0;
 			 P  -> list_to_integer(P)
 		     end,
 	    exmpp_session:send_packet(S,Presence);
-	[] when Type == <<"unavailable">> ->
+	undefined when Type == <<"unavailable">> ->
 	    %% probably too much
 	    bnc_status(S,Pr);
-	[] ->
+	undefined ->
 	    exmpp_session:send_packet(S,Presence);
 
 	To when Type == <<"unavailable">> ->
 						%io:format("effort to leave room ~p~n",[To]),
 	    add_room(To,BJ,S,Pr),
 						%send_packet(S,bnc_status_(exmpp_presence:set_type(Presence,available),Pr))
-	    send_packet(S,rejoin_(To,Pr));
+	    send_packet(S,rejoin_(To,bnc_status_(Pr)));
 	To when Type == undefined ->
 	    %% todo needs delay to always work
-	    send_packet(S,#xmlel{ns=?NS_JABBER_CLIENT,name='presence',attrs=[exmpp_xml:attribute(<<"to">>,To),
-									     exmpp_xml:attribute(<<"type">>,<<"unavailable">>)]}),
+	    send_packet(S,exmpp_stanza:set_recipient(exmpp_presence:unavailable(),To)),
 	    send_packet(S,Presence);
 
 	_ ->
@@ -253,7 +256,7 @@ server_handler(P,Id,T,SL,S,R,Pr) ->
 	Record = #received_packet{raw_packet=Packet} ->
 	    case is_process_alive(P) of
 		true ->
-						%P ! exmpp_xml:set_attribute(Packet,<<"to">>,FullJID),
+						%P ! exmpp_stanza:set_recipient(Packet,FullJID),
 		    P ! Packet,
 		    server_handler(P,Id,T,SL,S,R,Pr);
 		%% COMMENT when guard for off storing of other types of stanza
@@ -264,7 +267,7 @@ server_handler(P,Id,T,SL,S,R,Pr) ->
 			    server_handler(P,Id,T,SL,S,R,Pr);
 			_ when Record#received_packet.type_attr == "groupchat" ->
 			    %% UNCOMMENT to store room public messages (as private ones)
-			    %%insert_message(T,Id,exmpp_xml:set_attribute(Packet,<<"type">>,"chat")),
+			    %%insert_message(T,Id,exmpp_stanza:set_type(Packet,"chat")),
 			    %%server_handler(P,Id+1,T,SL,S,R,Pr);
 			    server_handler(P,Id,T,SL,S,R,Pr);
 			_ ->
@@ -281,11 +284,11 @@ server_handler(P,Id,T,SL,S,R,Pr) ->
 		%%	   Record#received_packet.type_attr == "unavailable" ->
 		%%    case exmpp_xml:get_attribute(exmpp_xml:get_element(exmpp_xml:get_element(Packet,'x'),'status'),<<"code">>,[]) of
 		%%	<<"307">> ->
-		%%	    case exmpp_xml:get_attribute(Packet,<<"from">>,[]) of
-		%%		[] ->
+		%%	    case exmpp_stanza:get_sender(Packet) of
+		%%		undefined ->
 		%%		    true;
 		%%		To ->
-		%%		    send_packet(S,rejoin_(To,Pr))
+		%%		    send_packet(S,rejoin_(To,bnc_status_(Pr)))
 		%%	    end;
 		%%	_ ->
 		%%	    true
@@ -390,14 +393,15 @@ add_room(R,BJ,S,Pr) ->
 		Rooms = mnesia:match_object(#rooms{room=R,_='_'}),
 		case Rooms of
 		    [] ->
-			mnesia:write(#rooms{room=R,barejid=BJ,session=S,seen=get_time(),prio=Pr});
+			mnesia:write(#rooms{room=R,barejid=BJ,session=S,seen=get_time(),prio=Pr,is_gateway=exmpp_stringprep:is_node(R)});
 		    Rooms ->
 			lists:foreach(fun(Room) ->
 					      if Room#rooms.barejid == BJ ->
 						      if Room#rooms.session == S ->
 							      update_bag(Room,Room#rooms{seen=get_time(),prio=Pr});
 							 true ->
-							      mnesia:write(#rooms{room=R,barejid=BJ,session=S,seen=get_time(),prio=Pr})
+							      mnesia:write(#rooms{room=R,barejid=BJ,session=S,seen=get_time(),prio=Pr,
+										  is_gateway=exmpp_stringprep:is_node(R)})
 						      end;
 						 true ->
 						      true
@@ -409,12 +413,12 @@ renew_rooms(S,NewS,Pr) ->
     Rooms = find_rooms(S),
     F = fun() -> lists:foreach(fun(X) ->
 				       update_bag(X,X#rooms{session=NewS}),
-				       catch send_packet(NewS,rejoin_(X#rooms.room,Pr)) end,Rooms)
+				       catch send_packet(NewS,rejoin_(X#rooms.room,bnc_status_(Pr))) end,Rooms)
 	end,
     mnesia:transaction(F).
 leave_rooms_(R) ->
     Packet = exmpp_presence:unavailable(),
-    F = fun() -> lists:foreach(fun(X) -> catch send_packet(X#rooms.session,exmpp_xml:set_attribute(Packet,<<"to">>,X#rooms.room)),
+    F = fun() -> lists:foreach(fun(X) -> catch send_packet(X#rooms.session,exmpp_stanza:set_recipient(Packet,X#rooms.room)),
 					 mnesia:delete_object(X) end,R)
 	end,
     mnesia:transaction(F).
@@ -425,7 +429,7 @@ leave_rooms(T) when is_atom(T) ->
 leave_rooms(R) ->
     leave_rooms_(R).
 find_stale(T) ->
-    F = fun() -> mnesia:select(rooms,[{#rooms{seen='$1',_='_'},[{'<','$1',T}],['$_']}]) end,
+    F = fun() -> mnesia:select(rooms,[{#rooms{seen='$1',is_gateway=false,_='_'},[{'<','$1',T}],['$_']}]) end,
     {atomic,MR} = mnesia:transaction(F),
     MR.
 
