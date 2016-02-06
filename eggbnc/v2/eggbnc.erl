@@ -23,8 +23,8 @@ server(J,P) ->
     exmpp_session:auth_info(S,J,P),
     [{Host,Port}|_] = exmpp_dns:get_c2s("gmail.com"),
     {ok,_,_} = exmpp_session:connect_TCP(S,Host,Port,[{starttls,enabled}
-						      %% UNCOMMENT to enable whitespace ping
-						      %%,{whitespace_ping,60000}
+						      %% COMMENT to disable ping
+						      ,{whitespace_ping,1800}
 						     ]),
     {ok,_ServerJID} = exmpp_session:login(S,"PLAIN"),
     S.
@@ -265,11 +265,22 @@ server_handler(P,Id,T,SL,S,R,Pr) ->
 		    case exmpp_message:get_body(Packet) of
 			undefined ->
 			    server_handler(P,Id,T,SL,S,R,Pr);
-			_ when Record#received_packet.type_attr == "groupchat" ->
-			    %% UNCOMMENT to store room public messages (as private ones)
-			    %%insert_message(T,Id,exmpp_stanza:set_type(Packet,"chat")),
-			    %%server_handler(P,Id+1,T,SL,S,R,Pr);
-			    server_handler(P,Id,T,SL,S,R,Pr);
+			_Body when Record#received_packet.type_attr == "groupchat" ->
+			    case Record#received_packet.from of
+				{_,undefined,_} ->
+				    server_handler(P,Id,T,SL,S,R,Pr);
+				{_,_,undefined} ->
+				    server_handler(P,Id,T,SL,S,R,Pr);
+				%% UNCOMMENT to store room public messages (as private ones)
+				%%{Node,Domain,Participant} ->
+				%%    Room = exmpp_jid:to_binary(exmpp_jid:make(Node,Domain)),
+				%%    NewBody = erlang:iolist_to_binary([Participant,": ",_Body]),
+				%%    NewPacket = exmpp_stanza:set_type(exmpp_stanza:set_sender(exmpp_message:set_body(Packet,NewBody),Room),"chat"),
+				%%    insert_message(T,Id,NewPacket),
+				%%    server_handler(P,Id+1,T,SL,S,R,Pr);
+				_ ->
+				    server_handler(P,Id,T,SL,S,R,Pr)
+			    end;
 			_ ->
 			    insert_message(T,Id,Packet),
 			    server_handler(P,Id+1,T,SL,S,R,Pr)

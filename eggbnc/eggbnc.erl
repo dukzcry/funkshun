@@ -22,8 +22,8 @@ server(J,P) ->
     exmpp_session:auth_info(S,J,P),
     [{Host,Port}|_] = exmpp_dns:get_c2s("gmail.com"),
     {ok,_,_} = exmpp_session:connect_TCP(S,Host,Port,[{starttls,enabled}
-						      %% UNCOMMENT to enable whitespace ping
-						      %%,{whitespace_ping,60000}
+						      %% COMMENT to disable ping
+						      ,{whitespace_ping,1800}
 						     ]),
     {ok,_ServerJID} = exmpp_session:login(S,"PLAIN"),
     S.

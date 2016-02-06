@@ -25,4 +25,3 @@ To read all entries in some table use eggbnc:get_all(table) helper
 - put it under supervisor. Need to be modified to follow OTP principles or supervisor bridge should be done prior
 - convert session setup routine into the state machine or find XMPP server library, support more chat programs. We are using Psi, OS X Messages and QIP. Tkabber, Pidgin and Miranda also reported to work
 - implement stream management
-- implement sane delivery of room public messages
