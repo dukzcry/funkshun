@@ -24,7 +24,7 @@ server(J,P) ->
     [{Host,Port}|_] = exmpp_dns:get_c2s("gmail.com"),
     {ok,_,_} = exmpp_session:connect_TCP(S,Host,Port,[{starttls,enabled}
 						      %% COMMENT to disable ping
-						      ,{whitespace_ping,1800}
+						      ,{whitespace_ping,3600}
 						     ]),
     {ok,_ServerJID} = exmpp_session:login(S,"PLAIN"),
     S.
@@ -282,6 +282,15 @@ server_handler(P,Id,T,SL,S,R,Pr) ->
 				    server_handler(P,Id,T,SL,S,R,Pr)
 			    end;
 			_ ->
+			    case exmpp_xml:get_element(Packet,'request') of
+				#xmlel{ns=?NS_RECEIPTS} ->
+				    Message = #xmlel{name='message',attrs=[exmpp_xml:attribute(<<"id">>,Record#received_packet.id),
+									   exmpp_xml:attribute(<<"to">>,exmpp_stanza:get_sender(Packet))]},
+				    Received = #xmlel{name='received',ns=?NS_RECEIPTS,attrs=[exmpp_xml:attribute(<<"id">>,Record#received_packet.id)]},
+				    send_packet(S,exmpp_xml:append_child(Message,Received));
+				_ ->
+				    true
+			    end,
 			    insert_message(T,Id,Packet),
 			    server_handler(P,Id+1,T,SL,S,R,Pr)
 		    end;
@@ -290,6 +299,18 @@ server_handler(P,Id,T,SL,S,R,Pr) ->
 				 Record#received_packet.type_attr == "subscribed") ->
 		    insert_message(T,Id,Packet),
 		    server_handler(P,Id+1,T,SL,S,R,Pr);
+		false when Record#received_packet.packet_type == iq andalso
+			   Record#received_packet.type_attr == "get" ->
+		    case exmpp_iq:get_payload_ns_as_atom(Packet) of
+			?NS_DISCO_INFO ->
+			    Result = exmpp_stanza:set_sender(exmpp_iq:result(Packet),undefined),
+			    Query = #xmlel{name='query',ns=?NS_DISCO_INFO},
+			    Feature = #xmlel{name='feature',attrs=[exmpp_xml:attribute(<<"var">>,?NS_RECEIPTS)]},
+			    send_packet(S,exmpp_xml:append_child(Result,exmpp_xml:append_child(Query,Feature)));
+			_ ->
+			    true
+		    end,
+		    server_handler(P,Id,T,SL,S,R,Pr);
 		%% UNCOMMENT to autorejoin room on kick
 		%%false when Record#received_packet.packet_type == 'presence' andalso
 		%%	   Record#received_packet.type_attr == "unavailable" ->

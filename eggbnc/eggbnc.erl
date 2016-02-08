@@ -23,7 +23,7 @@ server(J,P) ->
     [{Host,Port}|_] = exmpp_dns:get_c2s("gmail.com"),
     {ok,_,_} = exmpp_session:connect_TCP(S,Host,Port,[{starttls,enabled}
 						      %% COMMENT to disable ping
-						      ,{whitespace_ping,1800}
+						      ,{whitespace_ping,3600}
 						     ]),
     {ok,_ServerJID} = exmpp_session:login(S,"PLAIN"),
     S.
@@ -100,8 +100,7 @@ send_messages(T,S) ->
 	[] -> true;
 	M ->
 						%io:format("off msgs ~p~n", M),
-	    lists:foreach(fun(X) -> send(S,add_delayed(X#messages.stamp,X#messages.msg)) end,lists:sort(M)),
-	    mnesia:clear_table(T),
+	    lists:foreach(fun(X) -> mnesia:dirty_delete_object(T,X), send(S,add_delayed(X#messages.stamp,X#messages.msg)) end,lists:sort(M)),
 	    mnesia:dump_tables([T])
     end.
 add_delayed(TS,#xmlel{ns=NS}=Message) ->
@@ -155,7 +154,7 @@ connect(J,P) ->
 	[] ->
 	    ServerLambda = fun() -> server(J,P) end,
 	    Session = ServerLambda(),
-	    Pid = spawn(fun() -> monitor(process,Session), server_handler([],0,TableName,ServerLambda,?RECONNECT_TIME) end),
+	    Pid = spawn(fun() -> monitor(process,Session), server_handler([],0,TableName,ServerLambda,Session,?RECONNECT_TIME) end),
 	    %% todo kill proc on error
 	    ok = exmpp_session:set_controlling_process(Session,Pid),
 	    {_,ok} = insert_session(TableName,Pid,Session,get_time()),
@@ -199,42 +198,63 @@ client_handler(So,Se,P) ->
 	    client_handler(So,Se,P)
     end.
 
-server_handler(P,Id,T,SL,R) ->
+server_handler(P,Id,T,SL,S,R) ->
     receive
 	Record = #received_packet{raw_packet=Packet} ->
 	    case is_process_alive(P) of
 		true ->
 						%P ! exmpp_stanza:set_recipient(Packet,FullJID),
 		    P ! Packet,
-		    server_handler(P,Id,T,SL,R);
+		    server_handler(P,Id,T,SL,S,R);
 		%% COMMENT when guard for off storing of other types of stanza
 		false when Record#received_packet.packet_type == message andalso
 			   Record#received_packet.type_attr =/= "error" ->
 		    case exmpp_message:get_body(Packet) of
 			undefined ->
-			    server_handler(P,Id,T,SL,R);
+			    server_handler(P,Id,T,SL,S,R);
 			_ when Record#received_packet.type_attr == "groupchat" ->
-			    server_handler(P,Id,T,SL,R);
+			    server_handler(P,Id,T,SL,S,R);
 			_ ->
+			    case exmpp_xml:get_element(Packet,'request') of
+				#xmlel{ns=?NS_RECEIPTS} ->
+				    Message = #xmlel{name='message',attrs=[exmpp_xml:attribute(<<"id">>,Record#received_packet.id),
+									   exmpp_xml:attribute(<<"to">>,exmpp_stanza:get_sender(Packet))]},
+				    Received = #xmlel{name='received',ns=?NS_RECEIPTS,attrs=[exmpp_xml:attribute(<<"id">>,Record#received_packet.id)]},
+				    send_packet(S,exmpp_xml:append_child(Message,Received));
+				_ ->
+				    true
+			    end,
 			    insert_message(T,Id,Packet),
-			    server_handler(P,Id+1,T,SL,R)
+			    server_handler(P,Id+1,T,SL,S,R)
 		    end;
 		false when	Record#received_packet.packet_type == 'presence' andalso
 				(Record#received_packet.type_attr == "subscribe" orelse
 				 Record#received_packet.type_attr == "subscribed") ->
 		    insert_message(T,Id,Packet),
-		    server_handler(P,Id+1,T,SL,R);
+		    server_handler(P,Id+1,T,SL,S,R);
+		false when Record#received_packet.packet_type == iq andalso
+			   Record#received_packet.type_attr == "get" ->
+		    case exmpp_iq:get_payload_ns_as_atom(Packet) of
+			?NS_DISCO_INFO ->
+			    Result = exmpp_stanza:set_sender(exmpp_iq:result(Packet),undefined),
+			    Query = #xmlel{name='query',ns=?NS_DISCO_INFO},
+			    Feature = #xmlel{name='feature',attrs=[exmpp_xml:attribute(<<"var">>,?NS_RECEIPTS)]},
+			    send_packet(S,exmpp_xml:append_child(Result,exmpp_xml:append_child(Query,Feature)));
+			_ ->
+			    true
+		    end,
+		    server_handler(P,Id,T,SL,S,R);
 		_Catchall ->
 						%io:format("server packet catch all ~p~n",[Record]),
-		    server_handler(P,Id,T,SL,R)
+		    server_handler(P,Id,T,SL,S,R)
 	    end;
 	P1 when is_pid(P1) ->
-	    server_handler(P1,0,T,SL,R);
+	    server_handler(P1,0,T,SL,S,R);
 	{'DOWN',_,_,_,_} ->
 	    P ! stop,
 	    update_session(T,'session-in-restart'),
 	    self() ! restart,
-	    server_handler(P,Id,T,SL,R);
+	    server_handler(P,Id,T,SL,S,R);
 	restart ->
 	    io:format("~p server recon~n", [T]),
 	    %% UNCOMMENT for delay
@@ -243,18 +263,18 @@ server_handler(P,Id,T,SL,R) ->
 		NewS ->
 		    io:format("~p session resurrected~n", [T]),
 		    bnc_status(NewS),
-		    server_handler(P,Id,T,SL,?RECONNECT_TIME)
+		    server_handler(P,Id,T,SL,NewS,?RECONNECT_TIME)
 		    %% probably too much
 	    catch
 		_Catchall ->
 		    self() ! restart,
-		    server_handler(P,Id,T,SL,R*2)
+		    server_handler(P,Id,T,SL,S,R*2)
 	    end;
 	stop ->
 	    P ! stop;
 	_Catchall ->
 						%io:format("server catchall ~p~n",[_Catchall]),
-	    server_handler(P,Id,T,SL,R)
+	    server_handler(P,Id,T,SL,S,R)
     end.
 
 init_db() ->
