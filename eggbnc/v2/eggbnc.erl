@@ -124,6 +124,7 @@ bnc_status(S,P) ->
     send_packet(S,bnc_status_(P)).
 reconnect(SL,T) ->
     S = SL(),
+    true = is_process_alive(S),
     {_,ok} = update_session(T,S),
     monitor(process,S),
     S.
@@ -347,7 +348,6 @@ server_handler(P,Id,T,SL,S,R,Pr) ->
 		    bnc_status(NewS,Pr),
 		    renew_rooms(S,NewS,Pr),
 		    server_handler(P,Id,T,SL,NewS,?RECONNECT_TIME,Pr)
-		    %% probably too much
 	    catch
 		_Catchall ->
 		    self() ! restart,
@@ -393,7 +393,6 @@ kill_session(MR) ->
     F = fun() -> mnesia:delete_object(MR) end,
     mnesia:transaction(F),
     mnesia:clear_table(MR#sessions.jid).
-%% todo supervise and relaunch server proc instead
 maybe_kill_session([MR]) ->
     case is_process_alive(MR#sessions.pid) of
 	true ->

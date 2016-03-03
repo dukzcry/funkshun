@@ -120,6 +120,7 @@ bnc_status(S) ->
     send_packet(S,exmpp_presence:set_show(exmpp_presence:presence(available,"eggbouncer"),'xa')).
 reconnect(SL,T) ->
     S = SL(),
+    true = is_process_alive(S),
     {_,ok} = update_session(T,S),
     monitor(process,S),
     S.
@@ -264,7 +265,6 @@ server_handler(P,Id,T,SL,S,R) ->
 		    io:format("~p session resurrected~n", [T]),
 		    bnc_status(NewS),
 		    server_handler(P,Id,T,SL,NewS,?RECONNECT_TIME)
-		    %% probably too much
 	    catch
 		_Catchall ->
 		    self() ! restart,
@@ -304,7 +304,6 @@ kill_session(MR) ->
     F = fun() -> mnesia:delete_object(MR) end,
     mnesia:transaction(F),
     mnesia:clear_table(MR#sessions.jid).
-%% todo supervise and relaunch server proc instead
 maybe_kill_session([MR]) ->
     case is_process_alive(MR#sessions.pid) of
 	true ->
