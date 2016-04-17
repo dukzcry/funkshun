@@ -20,12 +20,14 @@ server(J,P) ->
 						%io:format("server con~n"),
     S = exmpp_session:start({1,0}),
     exmpp_session:auth_info(S,J,P),
-    [{Host,Port}|_] = exmpp_dns:get_c2s("gmail.com"),
-    {ok,_,_} = exmpp_session:connect_TCP(S,Host,Port,[{starttls,enabled}
-						      %% COMMENT to disable ping
-						      ,{whitespace_ping,3600}
-						     ]),
-    {ok,_ServerJID} = exmpp_session:login(S,"PLAIN"),
+    [{Host,_Port}|_] = exmpp_dns:get_c2s("gmail.com"),
+    %%{ok,_,_} = exmpp_session:connect_TCP(S,Host,_Port,[{starttls,enabled}
+    %%						      %% COMMENT to disable ping
+    %%						      ,{whitespace_ping,3600}
+    %%						     ]),
+    %%{ok,_ServerJID} = exmpp_session:login(S,"PLAIN"),
+    {ok,_,_} = exmpp_session:connect_SSL(S,Host,5223,[{whitespace_ping,3600}]),
+    {ok,_ServerJID} = exmpp_session:login(S,password),
     S.
 %%
 
@@ -127,6 +129,7 @@ reconnect(SL,T) ->
 
 start() ->
     exmpp:start(),
+    ssl:start(),
     init_db(),
     listen().
 
