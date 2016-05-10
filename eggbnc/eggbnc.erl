@@ -269,7 +269,7 @@ server_handler(P,Id,T,SL,S,R) ->
 		    bnc_status(NewS),
 		    server_handler(P,Id,T,SL,NewS,?RECONNECT_TIME)
 	    catch
-		_Catchall ->
+		_:_ ->
 		    self() ! restart,
 		    server_handler(P,Id,T,SL,S,R*2)
 	    end;

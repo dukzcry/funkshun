@@ -139,7 +139,6 @@ rejoin(S,Pr) ->
 rejoin(S) ->
     Rooms = find_rooms(S),
     lists:foreach(fun(X) -> send_packet(S,rejoin_(X#rooms.room,if X#rooms.is_gateway ->
-								       %% todo doesnt help much
 								       exmpp_presence:set_priority(exmpp_presence:available(),X#rooms.prio);
 								  true ->
 								       bnc_status_(X#rooms.prio) end)) end,Rooms).
@@ -352,7 +351,7 @@ server_handler(P,Id,T,SL,S,R,Pr) ->
 		    renew_rooms(S,NewS,Pr),
 		    server_handler(P,Id,T,SL,NewS,?RECONNECT_TIME,Pr)
 	    catch
-		_Catchall ->
+		_:_ ->
 		    self() ! restart,
 		    server_handler(P,Id,T,SL,S,R*2,Pr)
 	    end;
