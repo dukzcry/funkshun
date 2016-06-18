@@ -9,7 +9,7 @@
 
 -record(sessions,{jid,pid,seen,session}).
 -record(messages,{id,stamp,msg}).
--record(rooms,{session,seen,barejid,room,prio,is_gateway}).
+-record(rooms,{session,seen,barejid,room,prio}).
 
 %% user config
 -define(RECV_TIMEOUT,20000).
@@ -138,10 +138,7 @@ rejoin(S,Pr) ->
     lists:foreach(fun(X) -> send_packet(S,rejoin_(X#rooms.room,bnc_status_(Pr))) end,Rooms).
 rejoin(S) ->
     Rooms = find_rooms(S),
-    lists:foreach(fun(X) -> send_packet(S,rejoin_(X#rooms.room,if X#rooms.is_gateway ->
-								       exmpp_presence:set_priority(exmpp_presence:available(),X#rooms.prio);
-								  true ->
-								       bnc_status_(X#rooms.prio) end)) end,Rooms).
+    lists:foreach(fun(X) -> send_packet(S,rejoin_(X#rooms.room,bnc_status_(X#rooms.prio))) end,Rooms).
 
 start() ->
     exmpp:start(),
@@ -199,12 +196,17 @@ handle_packet(#xmlel{ns=NS}=Presence,Pr,S,BJ) when Presence#xmlel.name == 'prese
 	    bnc_status(S,Pr);
 	undefined ->
 	    exmpp_session:send_packet(S,Presence);
-
+	
 	To when Type == <<"unavailable">> ->
+	    IsGateway = exmpp_stringprep:is_node(To),
+	    if IsGateway ->
+		    exmpp_session:send_packet(S,Presence);
+	       true ->
 						%io:format("effort to leave room ~p~n",[To]),
-	    add_room(To,BJ,S,Pr),
+		    add_room(To,BJ,S,Pr),
 						%send_packet(S,bnc_status_(exmpp_presence:set_type(Presence,available),Pr))
-	    send_packet(S,rejoin_(To,bnc_status_(Pr)));
+		    send_packet(S,rejoin_(To,bnc_status_(Pr)))
+	    end;
 	To when Type == undefined ->
 	    %% todo needs delay to always work
 	    send_packet(S,exmpp_stanza:set_recipient(exmpp_presence:unavailable(),To)),
@@ -426,15 +428,14 @@ add_room(R,BJ,S,Pr) ->
 		Rooms = mnesia:match_object(#rooms{room=R,_='_'}),
 		case Rooms of
 		    [] ->
-			mnesia:write(#rooms{room=R,barejid=BJ,session=S,seen=get_time(),prio=Pr,is_gateway=exmpp_stringprep:is_node(R)});
+			mnesia:write(#rooms{room=R,barejid=BJ,session=S,seen=get_time(),prio=Pr});
 		    Rooms ->
 			lists:foreach(fun(Room) ->
 					      if Room#rooms.barejid == BJ ->
 						      if Room#rooms.session == S ->
 							      update_bag(Room,Room#rooms{seen=get_time(),prio=Pr});
 							 true ->
-							      mnesia:write(#rooms{room=R,barejid=BJ,session=S,seen=get_time(),prio=Pr,
-										  is_gateway=exmpp_stringprep:is_node(R)})
+							      mnesia:write(#rooms{room=R,barejid=BJ,session=S,seen=get_time(),prio=Pr})
 						      end;
 						 true ->
 						      true
@@ -462,7 +463,7 @@ leave_rooms(T) when is_atom(T) ->
 leave_rooms(R) ->
     leave_rooms_(R).
 find_stale(T) ->
-    F = fun() -> mnesia:select(rooms,[{#rooms{seen='$1',is_gateway=false,_='_'},[{'<','$1',T}],['$_']}]) end,
+    F = fun() -> mnesia:select(rooms,[{#rooms{seen='$1',_='_'},[{'<','$1',T}],['$_']}]) end,
     {atomic,MR} = mnesia:transaction(F),
     MR.
 

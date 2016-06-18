@@ -1,12 +1,12 @@
 MUC/transport support implementation is simple and naive
-- the bouncer will remember a conference/gateway (to rejoin in case of network failure) only if you once sent unavailable status to it
+- the bouncer will remember a conference (to rejoin in case of network failure) only if you once sent unavailable status to it
 - no password storing or captcha solving ;)
 
 Cleanup long-time unvisited rooms
 ```
 0 2 * * * leave.sh eggbnc@myhost 604800
 ```
-Manually leave all rooms/gateways for session
+Manually leave all rooms for session
 ```
 (eggbnc@myhost)1> eggbnc:leave_rooms(session).
 ```
