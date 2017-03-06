@@ -21,7 +21,10 @@ ccon = map toUpper con
 num = ['0'..'9']
 pun = "@&%?,=[]_:-+*$#!'^~;()/."
 
-longs = map (take 14 . concat) $ take 21 $ permutations $ [af num]:[af pun]:permutations [af ccon,af vow,af con]
+long = map (take 14 . concat) $ take 21 $ permutations $ [af num]:[af pun]:permutations [af ccon,af vow,af con]
+short = [[af ccon,af vow,af con,af num]]
+
+types n = [long,short] !! read n
 
 fromByteString = B.foldr (\ b l -> ord b:l) []
 finalPass a b = getZipList $ ZipList a <*> ZipList b
@@ -55,11 +58,11 @@ encodePass name pass =
     (Salt $ B.pack $ show (length name) ++ name) (Pass $ B.pack pass)
 
 main = do
-  [name,counter,site_] <- getArgs
+  [ptype,counter,name,site_] <- getArgs
   site <- checkSite site_
   pass <- checkPass
   key <- return $ encodePass <$> pure name <*> pass
   secret <- return $ encodeSite <$> key <*> site <*> pure counter
-  template <- return $ af longs <$> ord . B.head <$> secret
+  template <- return $ af (types ptype) <$> ord . B.head <$> secret
   secretList <- return $ fromByteString <$> B.tail <$> secret
   print $ finalPass <$> template <*> secretList
