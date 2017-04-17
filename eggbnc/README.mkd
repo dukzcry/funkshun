@@ -1,5 +1,5 @@
 Is a multi-user per resource XMPP (Jabber) bouncer and proxy with no special requirements for IM program
-###Howto
+### Howto
 **For priority, transport and MUC offline support see a version in v2 folder**
 
 Setup Erlang and exmpp (snapshot is needed for connecting to servers using TLS). Adjust bouncer config
@@ -20,6 +20,6 @@ Manually kill sessions with
 where session is a base64 encoded full JID seen in mnesia:info()
 
 To read all entries in some table use eggbnc:get_all(table) helper
-###Caveats and TODO
+### Caveats and TODO
 - note that there is no SSL/TLS implemented on a listening side, so SSL wrapping is on your behalf
 - convert session setup routine into the state machine or find XMPP server library, support more chat programs. We are using Psi, OS X Messages and QIP. Tkabber, Pidgin and Miranda also reported to work
