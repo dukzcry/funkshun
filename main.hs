@@ -16,8 +16,6 @@ import System.Console.Haskeline
 import Crypto.Scrypt
 import Crypto.Hash.SHA256
 
-af l n = l !! (n `mod` length l)
-
 vow = "aeiou";
 con = ['a'..'z'] \\ vow
 ccon = map toUpper con
@@ -27,6 +25,7 @@ pun = "@&%?,=[]_:-+*$#!^~;()/."
 long = map (take 14 . concat) $ take 21 $ permutations $ [af num]:[af pun]:permutations [af ccon,af vow,af con]
 short = [[af ccon,af vow,af con,af num]]
 
+af l n = l !! (n `mod` length l)
 types n = [long,short] !! read n
 
 fromByteString = B.foldr (\ b l -> ord b:l) []
