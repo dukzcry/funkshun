@@ -1,6 +1,6 @@
 -module(extremeware_brute_SUITE).
 
--author('Artem Falcon <lomka@gero.in>').
+-author('Artem Falcon <dukzcry@ya.ru>').
 
 -export([all/0,suite/0,main/1]).
 

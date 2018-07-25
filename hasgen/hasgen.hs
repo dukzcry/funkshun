@@ -1,8 +1,3 @@
-#!/usr/bin/env nix-shell
-#!nix-shell -i runhaskell -p "haskellPackages.ghcWithPackages (pkgs: [pkgs.network-uri pkgs.haskeline pkgs.scrypt pkgs.cryptohash-sha256 ])"
-
--- Written by Artem Falcon <lomka@gero.in>
-
 import System.Environment
 import qualified Data.ByteString.Char8 as B
 import Data.Maybe

@@ -1,7 +1,7 @@
 #!/usr/bin/env escript
 %%! -smp enable
 
--author('Artem Falcon <lomka@gero.in>').
+-author('Artem Falcon <dukzcry@ya.ru>').
 
 -mode(native).
 

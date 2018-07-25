@@ -1,6 +1,6 @@
 -module(eggbnc).
 
--author('A.V. Lukyanov <lomka@gero.in>').
+-author('A.V. Lukyanov <dukzcry@ya.ru>').
 
 -export([start/0,dump/0,cleanup/1,kill/1,get_all/1]).
 
