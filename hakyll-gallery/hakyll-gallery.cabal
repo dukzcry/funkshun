@@ -1,0 +1,28 @@
+cabal-version:      2.4
+name:               hakyll-gallery
+version:            0.1.0.0
+synopsis:           Gallery implemented with Hakyll
+description:
+  Features:
+  * Infinite number of separate galleries
+  * Images and video support
+  * Item descriptions
+  * Thumbnail and presentation mode
+  * Keyboard and mouse navigation in presentation mode
+  * Image and description fill whole page, while comments like Disqus go under scroll
+  * Template with full and teaser modes to embed on any page or post
+
+homepage:           https://github.com/dukzcry/dukzcry.github.io
+author:             Artem Lukyanov
+maintainer:         dukzcry@ya.ru
+
+library
+    exposed-modules:  Hakyll.Gallery
+    other-extensions: OverloadedStrings
+    build-depends:    base == 4.*
+                    , hakyll
+                    , hakyll-images
+                    , filepath
+                    , natural-sort
+    hs-source-dirs:   src
+    default-language: Haskell2010
