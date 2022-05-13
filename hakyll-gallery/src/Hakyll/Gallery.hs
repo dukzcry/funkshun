@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Hakyll.Gallery (
 makeGalleryCtx,galleryRuleset
-,GallerySettings,GalleryImage,defaultGallerySettings,matchExtensions
+,GallerySettings(..),GalleryImage(..),defaultGallerySettings,matchExtensions
 ) where
 
 import Hakyll
