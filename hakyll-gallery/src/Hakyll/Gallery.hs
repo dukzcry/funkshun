@@ -55,7 +55,7 @@ defaultGallerySettings = GallerySettings {
   galleryFiles folder = galleryImages folder .||. galleryVideos folder
 
 
-galleryRuleset siteCtx postCtx compress settings = do
+galleryRuleset siteCtx postCtx settings = do
     let folder' = folder settings
     let image = compressImages settings
     let thumb = imageThumbs settings
