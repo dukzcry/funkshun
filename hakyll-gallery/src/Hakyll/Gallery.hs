@@ -30,8 +30,8 @@ data GallerySettings = GallerySettings {
   filesExts :: Pattern,
   naturalSort :: Bool,
   previewNum :: Int,
-  siteCtx :: Context String,
-  postCtx :: Context String,
+  siteContext :: Context String,
+  postContext :: Context String,
   defaultTemplate :: Identifier,
   defaultGalleryTemplate :: Identifier
 }
@@ -50,8 +50,8 @@ defaultGallerySettings = GallerySettings {
   filesExts = galleryFiles folder,
   naturalSort = True,
   previewNum = 5,
-  siteCtx = defaultContext,
-  postCtx = defaultContext,
+  siteContext = defaultContext,
+  postContext = defaultContext,
   defaultTemplate = "templates/default.html",
   defaultGalleryTemplate = "templates/gallery.html"
 } where
@@ -67,8 +67,8 @@ galleryRuleset settings = do
     let folder' = folder settings
     let image = compressImages settings
     let thumb = imageThumbs settings
-    let siteCtx' = siteCtx settings
-    let postCtx' = postCtx settings
+    let siteCtx = siteContext settings
+    let postCtx = postContext settings
     if (compress image) then
         match (exts image) $ do
           route   idRoute
@@ -105,7 +105,7 @@ galleryRuleset settings = do
           getResourceString
             >>= renderPandoc
             >>= galleryApplyAsTemplate ctx
-            >>= loadAndApplyTemplate (defaultTemplate settings) (constField "title" (title settings) `mappend` siteCtx')
+            >>= loadAndApplyTemplate (defaultTemplate settings) (constField "title" (title settings) `mappend` siteCtx)
             >>= relativizeUrls
 
     rulesExtraDependencies [galleryDependencies] $ do
@@ -125,9 +125,9 @@ galleryRuleset settings = do
                 constField "baseurl" ("/" ++ folder') `mappend`
                 -- here we get description for gallery item
                 (field "body" . return . loadBody . fromFilePath $ path <.> "md") `mappend`
-                siteCtx'
+                siteCtx
           makeItem ""
-            >>= loadAndApplyTemplate (defaultGalleryTemplate settings) (ctx' `mappend` postCtx')
+            >>= loadAndApplyTemplate (defaultGalleryTemplate settings) (ctx' `mappend` postCtx)
             >>= relativizeUrls
 
 matchExtensions exts folder =
