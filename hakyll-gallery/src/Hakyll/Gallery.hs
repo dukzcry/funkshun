@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Hakyll.Gallery (
 makeGalleryCtx,galleryRuleset
-,GallerySettings(..),GalleryImage(..),defaultGallerySettings,matchExtensions
+,GallerySettings(..),GalleryImage(..),defaultGallerySettings,matchExtensions,galleryApplyAsTemplate
 ) where
 
 import Hakyll
@@ -29,7 +29,11 @@ data GallerySettings = GallerySettings {
   videoThumbs :: GalleryImage,
   filesExts :: Pattern,
   naturalSort :: Bool,
-  previewNum :: Int
+  previewNum :: Int,
+  siteCtx :: Context String,
+  postCtx :: Context String,
+  defaultTemplate :: Identifier,
+  defaultGalleryTemplate :: Identifier
 }
 defaultGallerySettings = GallerySettings {
   title = "Галерея",
@@ -45,7 +49,11 @@ defaultGallerySettings = GallerySettings {
   },
   filesExts = galleryFiles folder,
   naturalSort = True,
-  previewNum = 5
+  previewNum = 5,
+  siteCtx = defaultContext,
+  postCtx = defaultContext,
+  defaultTemplate = "templates/default.html",
+  defaultGalleryTemplate = "templates/gallery.html"
 } where
   folder = "gallery"
   galleryLossyImages = matchExtensions ["jpg", "jpeg"]
@@ -55,10 +63,12 @@ defaultGallerySettings = GallerySettings {
   galleryFiles folder = galleryImages folder .||. galleryVideos folder
 
 
-galleryRuleset siteCtx postCtx settings = do
+galleryRuleset settings = do
     let folder' = folder settings
     let image = compressImages settings
     let thumb = imageThumbs settings
+    let siteCtx' = siteCtx settings
+    let postCtx' = postCtx settings
     if (compress image) then
         match (exts image) $ do
           route   idRoute
@@ -94,10 +104,8 @@ galleryRuleset siteCtx postCtx settings = do
           ctx <- makeGalleryCtx settings
           getResourceString
             >>= renderPandoc
-            -- apply twice first $gallery()$ into $for()$ template then $for()$ into html code
-            >>= applyAsTemplate ctx
-            >>= applyAsTemplate ctx
-            >>= loadAndApplyTemplate "templates/default.html" (constField "title" (title settings) `mappend` siteCtx)
+            >>= galleryApplyAsTemplate ctx
+            >>= loadAndApplyTemplate (defaultTemplate settings) (constField "title" (title settings) `mappend` siteCtx')
             >>= relativizeUrls
 
     rulesExtraDependencies [galleryDependencies] $ do
@@ -117,9 +125,9 @@ galleryRuleset siteCtx postCtx settings = do
                 constField "baseurl" ("/" ++ folder') `mappend`
                 -- here we get description for gallery item
                 (field "body" . return . loadBody . fromFilePath $ path <.> "md") `mappend`
-                siteCtx
+                siteCtx'
           makeItem ""
-            >>= loadAndApplyTemplate "templates/gallery.html" (ctx' `mappend` postCtx)
+            >>= loadAndApplyTemplate (defaultGalleryTemplate settings) (ctx' `mappend` postCtx')
             >>= relativizeUrls
 
 matchExtensions exts folder =
@@ -127,6 +135,10 @@ matchExtensions exts folder =
     exts' = map (fromGlob . ((++) $ folder ++ "/*/*.")) exts
   in
     foldl1 (.||.) exts'
+
+galleryApplyAsTemplate ctx item =
+  -- apply twice first $gallery()$ into $for()$ template then $for()$ into html code
+  applyAsTemplate ctx item >>= applyAsTemplate ctx
 
 data DList a = Empty | Cell { elem :: a, prev :: DList a, next :: DList a } deriving (Eq)
 
