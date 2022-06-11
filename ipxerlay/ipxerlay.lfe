@@ -1,4 +1,4 @@
-; Written by Artem Falcon <dukzcry@ya.ru>
+; Written by Artem Lukyanov <dukzcry@ya.ru>
 
 (defmodule ipxerlay
   ;(behavior 'gen_server)
